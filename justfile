@@ -38,15 +38,11 @@ alias t := nextest
 nextest *FLAGS="--all":
     cargo nextest run {{ FLAGS }}
 
-# Restart the docker stack
-[private]
-restart: down && dev
-
 # Show unused dependencies
 udeps:
     cargo +nightly udeps
 
-# Install the tools required for development
+# Install the tools suggested for development
 install-tools:
     @echo "Installing tools..."
     @echo "If you get an error, try running `brew install cargo-binstall`"

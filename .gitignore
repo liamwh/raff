@@ -4,6 +4,7 @@ Cargo.locks
 node_modules/
 .husky/_/
 .DS_Store
+.cursor
 
 # Ignore go.work
 *.work

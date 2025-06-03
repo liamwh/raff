@@ -7,7 +7,7 @@ pub fn print_report(
     threshold: usize,
 ) -> bool {
     let mut table = Table::new();
-    let mut format = format::FormatBuilder::new()
+    let format = format::FormatBuilder::new()
         .column_separator('│')
         .borders('│')
         .separators(
