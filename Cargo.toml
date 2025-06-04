@@ -21,3 +21,6 @@ toml = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 serde_yaml = "0.9"
+num_cpus = "1.16.0"
+color-eyre = "0.6.3"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }

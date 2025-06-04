@@ -1,10 +1,5 @@
-use anyhow::Result;
-use std::{
-    collections::HashMap,
-    fs,
-    path::PathBuf,
-    process::exit, // Consider if exit is appropriate here or if errors should bubble up
-};
+use anyhow::{bail, Context, Result};
+use std::{collections::HashMap, fs, path::PathBuf};
 use syn::visit::Visit;
 use syn::File as SynFile;
 
@@ -24,49 +19,42 @@ impl StatementCountRule {
 
     pub fn run(&self, args: &StatementCountArgs) -> Result<()> {
         let threshold = args.threshold;
-        let src_dir = &args.src_dir; // src_dir is already a PathBuf in StatementCountArgs
+        let analysis_path = &args.path; // Changed from src_dir to path
 
-        if !src_dir.exists() {
-            eprintln!("Error: src directory not found at {}", src_dir.display());
-            // Consider returning an error instead of exiting directly
-            // return Err(anyhow::anyhow!("src directory not found"));
-            exit(1); // Or handle exit in main based on Result
+        if !analysis_path.exists() {
+            bail!("Error: Path not found at {}", analysis_path.display());
         }
-        if !src_dir.is_dir() {
-            eprintln!(
-                "Error: --src-dir '{}' is not a directory.",
-                src_dir.display()
+        if !analysis_path.is_dir() {
+            bail!(
+                "Error: Provided path '{}' is not a directory.",
+                analysis_path.display()
             );
-            exit(1);
         }
 
         let mut all_rs_files: Vec<PathBuf> = Vec::new();
-        collect_all_rs(src_dir, &mut all_rs_files);
+        collect_all_rs(analysis_path, &mut all_rs_files).with_context(|| {
+            format!(
+                "Failed to collect Rust files from {}",
+                analysis_path.display()
+            )
+        })?;
 
         if all_rs_files.is_empty() {
-            eprintln!("Error: No `.rs` files found under {}", src_dir.display());
-            exit(1);
+            bail!(
+                "Error: No `.rs` files found under {}",
+                analysis_path.display()
+            );
         }
 
         // Map each file path (String) → stmt_count (usize)
         let mut file_to_stmt: HashMap<String, usize> = HashMap::new();
 
         for path_buf in &all_rs_files {
-            let content = match fs::read_to_string(path_buf) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("Error reading {}: {}", path_buf.display(), e);
-                    exit(1);
-                }
-            };
+            let content = fs::read_to_string(path_buf)
+                .with_context(|| format!("Error reading file {}", path_buf.display()))?;
 
-            let ast: SynFile = match syn::parse_file(&content) {
-                Ok(f) => f,
-                Err(e) => {
-                    eprintln!("Error parsing {}: {}", path_buf.display(), e);
-                    exit(1);
-                }
-            };
+            let ast: SynFile = syn::parse_file(&content)
+                .with_context(|| format!("Error parsing file {}", path_buf.display()))?;
 
             let mut counter = StmtCounter::new();
             counter.visit_file(&ast);
@@ -76,11 +64,12 @@ impl StatementCountRule {
         }
 
         if file_to_stmt.is_empty() {
-            eprintln!(
+            // This case should ideally be covered by all_rs_files.is_empty() if parsing never yields statements
+            // but keeping it as a safeguard, though it might indicate an issue with StmtCounter or parsing logic.
+            bail!(
                 "Error: Did not find any Rust AST statements under {}",
-                src_dir.display()
+                analysis_path.display()
             );
-            exit(1);
         }
 
         // Group by top-level namespace
@@ -88,7 +77,7 @@ impl StatementCountRule {
         let mut component_stats: HashMap<String, (usize, usize)> = HashMap::new();
 
         for path_buf in &all_rs_files {
-            let namespace = relative_namespace(path_buf, src_dir);
+            let namespace = relative_namespace(path_buf, analysis_path);
             let top = top_level_component(&namespace);
 
             let path_str = path_buf.to_string_lossy();
@@ -103,21 +92,21 @@ impl StatementCountRule {
         let grand_total: usize = component_stats.values().map(|&(_f, st)| st).sum();
 
         if grand_total == 0 {
-            eprintln!("Error: Total Rust statements = 0. Exiting.");
-            exit(1);
+            // This implies .rs files were found, but no statements were counted.
+            bail!("Error: Total Rust statements = 0. Ensure .rs files contain statements or check parsing. Path: {}", analysis_path.display());
         }
 
-        println!("\nStatement Count Report:");
+        println!(
+            "\nStatement Count Report (analyzing path: {}):",
+            analysis_path.display()
+        );
         let any_over_threshold = print_report(&component_stats, grand_total, threshold);
 
         if any_over_threshold {
-            eprintln!(
-                "\nError: At least one component exceeds {}% of total statements.",
+            bail!(
+                "At least one component exceeds {}% of total statements.",
                 threshold
             );
-            // Instead of exiting, return an error to be handled by main
-            // This allows main to decide on the exit code or further actions.
-            return Err(anyhow::anyhow!("Component threshold exceeded."));
         }
 
         println!(

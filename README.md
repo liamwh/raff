@@ -5,6 +5,5 @@ Inspired by [Mark Richard](https://developertoarchitect.com/mark-richards.html)'
 ## TODOS
 
 - [ ] FF: Is codebase flat? (Flatten codebase into components)
-- [ ] FF: Identify code volatility per component by using git history
 - [ ] FF: No source code should reside in the root namespace
 - [ ] Map the imports and output a diagram of the dependencies

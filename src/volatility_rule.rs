@@ -74,26 +74,30 @@ impl VolatilityRule {
     /// and initializes their statistics.
     ///
     /// # Arguments
-    /// * `repo_path` - The root path of the repository to scan.
+    /// * `analysis_path_canonical` - The root path of the repository to scan.
     ///
     /// # Returns
     /// A `Result` containing a map from crate name to its initialized `CrateStats`,
     /// or an error if discovery or parsing fails.
-    fn discover_crates_and_init_stats(&self, repo_canonical_path: &Path) -> Result<CrateStatsMap> {
+    fn discover_crates_and_init_stats(
+        &self,
+        analysis_path_canonical: &Path,
+    ) -> Result<CrateStatsMap> {
         let mut crate_stats_map = CrateStatsMap::new();
+        tracing::debug!(
+            "Discovering crates by finding Cargo.toml files in {}",
+            analysis_path_canonical.display()
+        );
 
-        tracing::debug!("Discovering crates by finding Cargo.toml files...");
-
-        for entry in WalkDir::new(repo_canonical_path)
+        for entry in WalkDir::new(analysis_path_canonical)
             .into_iter()
-            .filter_map(|e| e.ok()) // Filter out errors during walk
+            .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy() == "Cargo.toml")
         {
             let cargo_toml_path_abs = entry.path();
             let crate_root_abs = match cargo_toml_path_abs.parent() {
                 Some(p) => p.to_path_buf(),
                 None => {
-                    // This case should be rare (Cargo.toml at the root of filesystem?)
                     tracing::warn!(
                         path = %cargo_toml_path_abs.display(),
                         "Cargo.toml found with no parent directory, skipping."
@@ -102,14 +106,13 @@ impl VolatilityRule {
                 }
             };
 
-            // Make crate_root relative to the repository root
             let crate_root_relative = crate_root_abs
-                .strip_prefix(repo_canonical_path)
+                .strip_prefix(analysis_path_canonical)
                 .with_context(|| {
                     format!(
                         "Failed to make crate root path '{}' relative to repo root '{}'",
                         crate_root_abs.display(),
-                        repo_canonical_path.display()
+                        analysis_path_canonical.display()
                     )
                 })?
                 .to_path_buf();
@@ -136,11 +139,6 @@ impl VolatilityRule {
 
             if let Some(name) = crate_name_opt {
                 if crate_stats_map.contains_key(&name) {
-                    // This could happen in workspaces with path dependencies if not careful,
-                    // or if a crate name is duplicated. For now, we warn and overwrite,
-                    // assuming the first one found at a shallower depth (if WalkDir provides that order)
-                    // or the last one encountered is taken.
-                    // A more robust solution might involve checking paths.
                     tracing::warn!(
                         crate_name = name,
                         new_path_relative = %crate_root_relative.display(),
@@ -159,10 +157,10 @@ impl VolatilityRule {
                         commit_touch_count: 0,
                         lines_added: 0,
                         lines_deleted: 0,
-                        raw_score: 0.0,          // Initialize new field
-                        total_loc: None,         // Initialize new field
-                        normalized_score: None,  // Initialize new field
-                        birth_commit_time: None, // Initialize new field
+                        raw_score: 0.0,
+                        total_loc: None,
+                        normalized_score: None,
+                        birth_commit_time: None,
                     },
                 );
             } else {
@@ -176,14 +174,9 @@ impl VolatilityRule {
         if crate_stats_map.is_empty() {
             return Err(anyhow::anyhow!(
                 "No crates (Cargo.toml with [package].name) found under {}. Ensure you are running in a Rust project with crates.",
-                repo_canonical_path.display()
+                analysis_path_canonical.display()
             ));
         }
-
-        tracing::info!(
-            count = crate_stats_map.len(),
-            "Found crate(s). Initialized stats with relative paths."
-        );
         Ok(crate_stats_map)
     }
 
@@ -195,13 +188,10 @@ impl VolatilityRule {
         file_path_in_repo: &Path,
         crate_stats_map: &CrateStatsMap,
     ) -> Option<(String, PathBuf)> {
-        // Returns (crate_name, crate_root_path)
         let mut longest_match: Option<(String, PathBuf)> = None;
         let mut max_depth = 0;
 
         for (name, stats) in crate_stats_map {
-            // stats.root_path is now relative to repo root.
-            // file_path_in_repo is also relative to repo root.
             if file_path_in_repo.starts_with(&stats.root_path) {
                 let depth = stats.root_path.components().count();
                 if depth > max_depth {
@@ -219,9 +209,9 @@ impl VolatilityRule {
     fn calculate_loc_for_crate(
         &self,
         crate_relative_path: &Path,
-        repo_canonical_path: &Path,
+        analysis_path_canonical: &Path,
     ) -> Result<usize> {
-        let crate_abs_path = repo_canonical_path.join(crate_relative_path);
+        let crate_abs_path = analysis_path_canonical.join(crate_relative_path);
         tracing::debug!(path = %crate_abs_path.display(), "Calculating LoC for crate at absolute path");
         let mut total_loc = 0;
         for entry in WalkDir::new(crate_abs_path)
@@ -432,362 +422,218 @@ impl VolatilityRule {
 
     #[tracing::instrument(level = "debug", skip_all, err)]
     pub fn run(&self, args: &VolatilityArgs) -> Result<()> {
-        let alpha = args.alpha;
-        let since_date_str_opt = args.since.as_ref(); // Option<&String> from Option<String>
-        let normalize = args.normalize;
-        let skip_merges = args.skip_merges;
-        let repo_path_arg = &args.repo_path;
-        let output_format = &args.output;
+        let analysis_path = &args.path;
+        let analysis_path_canonical = analysis_path
+            .canonicalize()
+            .with_context(|| format!("Failed to canonicalize path: {}", analysis_path.display()))?;
+        tracing::info!(path = %analysis_path_canonical.display(), "Running volatility analysis on repository");
 
+        let repo = Repository::open(&analysis_path_canonical).with_context(|| {
+            format!(
+                "Could not open Git repository at '{}'",
+                analysis_path_canonical.display()
+            )
+        })?;
+        tracing::debug!("Successfully opened Git repository.");
+
+        let mut crate_stats_map = self.discover_crates_and_init_stats(&analysis_path_canonical)?;
+        self.populate_crate_birth_times(&repo, &mut crate_stats_map)?;
+
+        let since_timestamp = args.since.as_ref().map_or(Ok(0_i64), |date_str| {
+            NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                .map(|naive_date| {
+                    Utc.from_local_date(&naive_date)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap()
+                        .timestamp()
+                })
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "Invalid --since date format '{}': {}. Please use YYYY-MM-DD.",
+                        date_str,
+                        e
+                    )
+                })
+        })?;
         tracing::debug!(
-            repo_path = %repo_path_arg.display(),
-            alpha,
-            since = since_date_str_opt,
-            normalize,
-            skip_merges,
-            output_format,
-            "Starting Volatility Rule execution with options"
+            since_timestamp = since_timestamp,
+            "Processing commits since"
         );
 
-        if !repo_path_arg.is_dir() {
-            return Err(anyhow::anyhow!(
-                "Repository path '{}' is not a valid directory.",
-                repo_path_arg.display()
-            ));
-        }
-        let canonical_repo_path = repo_path_arg.canonicalize().with_context(|| {
-            format!(
-                "Failed to get canonical path for repository: {}",
-                repo_path_arg.display()
-            )
-        })?;
-        tracing::debug!(path = %canonical_repo_path.display(), "Canonical repository path resolved.");
-        if !canonical_repo_path.join(".git").exists() {
-            return Err(anyhow::anyhow!(
-                "The specified repository path '{}' does not appear to be a Git repository (missing .git directory).",
-                canonical_repo_path.display()
-            ));
-        }
-
-        let mut crate_stats_map = self.discover_crates_and_init_stats(&canonical_repo_path)?;
-        if crate_stats_map.is_empty() {
-            tracing::info!("No crates found. Exiting.");
-            return Ok(());
-        }
-
-        let repo = Repository::open(&canonical_repo_path).with_context(|| {
-            format!(
-                "Failed to open Git repository at {}",
-                canonical_repo_path.display()
-            )
-        })?;
-        tracing::debug!(path = ?repo.path(), "Successfully opened Git repository.");
-
-        // Populate crate birth times
-        self.populate_crate_birth_times(&repo, &mut crate_stats_map)
-            .context("Failed to populate crate birth times")?;
-
-        tracing::debug!("Setting up revision walk (revwalk).");
-        let head_oid = repo.head()?.peel_to_commit()?.id();
-        tracing::debug!(head_oid = %head_oid, "Resolved HEAD OID.");
         let mut revwalk = repo.revwalk()?;
-        revwalk.push(head_oid)?;
-        let since_timestamp_opt: Option<i64> = since_date_str_opt
-            .map(|date_str| {
-                NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-                    .map_err(|e| {
-                        anyhow::anyhow!(
-                            "Invalid --since date format '{}': {}. Please use YYYY-MM-DD.",
-                            date_str,
-                            e
-                        )
-                    })
-                    .and_then(|naive_date| {
-                        let naive_datetime = naive_date.and_hms_opt(0, 0, 0).ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "Invalid date '{}': could not convert to NaiveDateTime at 00:00:00",
-                                date_str
-                            )
-                        })?;
-                        Ok(Utc.from_utc_datetime(&naive_datetime))
-                    })
-                    .map(|datetime| datetime.timestamp())
-            })
-            .transpose()?;
-        if let Some(ts) = since_timestamp_opt {
-            tracing::debug!(since_timestamp = ts, "Applying date cutoff to revwalk.");
-        }
-        tracing::info!("Iterating through commits for volatility analysis...");
-        let mut processed_commit_count = 0;
+        revwalk.push_head()?;
+        revwalk.set_sorting(Sort::TIME | Sort::REVERSE)?;
+
+        let mut processed_commits = 0;
+        let mut pending_stat_updates: Vec<(String, char)> = Vec::new(); // For deferred updates
+
         for oid_result in revwalk {
-            let oid = oid_result.context("Failed to get OID from revwalk")?;
+            let oid = oid_result.with_context(|| "Failed to walk revisions")?;
             let commit = repo
                 .find_commit(oid)
-                .context("Failed to find commit from OID")?;
+                .with_context(|| "Failed to find commit")?;
             let commit_time = commit.time().seconds();
 
-            if let Some(cutoff_ts) = since_timestamp_opt {
-                if commit_time < cutoff_ts {
-                    tracing::debug!(commit_oid = %commit.id(), %commit_time, cutoff_time = cutoff_ts, "Commit is older than --since cutoff. Stopping revwalk.");
-                    break;
-                }
-            }
-            if skip_merges && commit.parent_count() > 1 {
-                tracing::trace!(commit_oid = %commit.id(), parent_count = commit.parent_count(), "Skipping merge commit.");
+            let parents: Vec<_> = commit.parents().collect();
+            if args.skip_merges && parents.len() > 1 {
+                tracing::trace!(commit_id = %oid, "Skipping merge commit.");
                 continue;
             }
-            tracing::debug!(commit_oid = %commit.id(), summary = %commit.summary().unwrap_or_default().trim(), "Processing commit.");
-            let current_tree = commit
-                .tree()
-                .context("Failed to get tree for current commit")?;
-            let parent_tree_opt = if commit.parent_count() == 0 {
-                None
+
+            let tree = commit.tree().with_context(|| "Failed to get commit tree")?;
+            let parent_tree_opt = if !parents.is_empty() {
+                parents[0].tree().ok()
             } else {
-                Some(
-                    commit
-                        .parent(0)?
-                        .tree()
-                        .context("Failed to get tree for parent commit (0)")?,
-                )
+                None
             };
+
             let mut diff_opts = DiffOptions::new();
             diff_opts.context_lines(0);
             diff_opts.interhunk_lines(0);
+
             let diff = repo
-                .diff_tree_to_tree(
-                    parent_tree_opt.as_ref(),
-                    Some(&current_tree),
-                    Some(&mut diff_opts),
-                )
-                .context("Failed to compute diff between commit and its parent")?;
+                .diff_tree_to_tree(parent_tree_opt.as_ref(), Some(&tree), Some(&mut diff_opts))
+                .with_context(|| "Failed to compute diff")?;
 
-            let mut crates_touched_this_commit_for_stats = HashSet::new();
-            diff.deltas().for_each(|delta| {
-                let file_path = delta.new_file().path().or_else(|| delta.old_file().path());
-                if let Some(p) = file_path {
-                    if let Some((crate_name, _)) = self.find_owning_crate(p, &crate_stats_map) {
-                        // Check against birth_commit_time AND global --since before adding to set
-                        if let Some(stats) = crate_stats_map.get(&crate_name) {
-                            let effective_since_timestamp = stats.birth_commit_time.map_or_else(
-                                || since_timestamp_opt, // If no birth time, use global since
-                                |bt| Some(since_timestamp_opt.map_or(bt, |st| bt.max(st))), // Use max(birth_time, global_since)
-                            );
-                            if effective_since_timestamp
-                                .is_none_or(|eff_since| commit_time >= eff_since)
-                            {
-                                crates_touched_this_commit_for_stats.insert(crate_name.clone());
-                            }
+            if commit_time < since_timestamp {
+                tracing::trace!(commit_id = %oid, commit_date = %DateTime::from_timestamp(commit_time, 0).unwrap().format("%Y-%m-%d"), "Commit is older than --since date, skipping for volatility calculation (but was considered for birth date).");
+                continue;
+            }
+
+            processed_commits += 1;
+            let mut touched_crates_in_commit = HashSet::new();
+            pending_stat_updates.clear(); // Clear for each commit
+
+            diff.foreach(
+                &mut |delta, _progress| {
+                    if let Some(delta_path) =
+                        delta.new_file().path().or_else(|| delta.old_file().path())
+                    {
+                        // This immutable borrow of crate_stats_map is fine
+                        if let Some((crate_name, _)) =
+                            self.find_owning_crate(delta_path, &crate_stats_map)
+                        {
+                            touched_crates_in_commit.insert(crate_name.clone());
                         }
                     }
-                }
-            });
-
-            diff.print(DiffFormat::Patch, |_delta_cb, _hunk_cb, line_cb| {
-                let current_file_path = _delta_cb
-                    .new_file()
-                    .path()
-                    .or_else(|| _delta_cb.old_file().path());
-                if let Some(p) = current_file_path {
-                    if let Some((crate_name, _)) = self.find_owning_crate(p, &crate_stats_map) {
-                        if let Some(stats) = crate_stats_map.get_mut(&crate_name) {
-                            // Check against birth_commit_time AND global --since before updating line stats
-                            let effective_since_timestamp = stats.birth_commit_time.map_or_else(
-                                || since_timestamp_opt, // If no birth time, use global since
-                                |bt| Some(since_timestamp_opt.map_or(bt, |st| bt.max(st))), // Use max(birth_time, global_since)
-                            );
-
-                            if effective_since_timestamp
-                                .is_none_or(|eff_since| commit_time >= eff_since)
-                            {
-                                match line_cb.origin() {
-                                    '+' | '>' => stats.lines_added += 1,
-                                    '-' | '<' => stats.lines_deleted += 1,
-                                    _ => {}
-                                }
-                            }
+                    true
+                },
+                None, // binary_callback
+                None, // hunk_callback
+                Some(&mut |delta, _hunk, line| {
+                    // line_callback
+                    if let Some(delta_path) =
+                        delta.new_file().path().or_else(|| delta.old_file().path())
+                    {
+                        // This immutable borrow of crate_stats_map is fine
+                        if let Some((crate_name, _)) =
+                            self.find_owning_crate(delta_path, &crate_stats_map)
+                        {
+                            // Defer mutation by pushing to pending_stat_updates
+                            pending_stat_updates.push((crate_name.clone(), line.origin()));
                         }
                     }
-                }
-                true
-            })?;
+                    true
+                }),
+            )
+            .with_context(|| "Error processing diff lines")?;
 
-            for crate_name in &crates_touched_this_commit_for_stats {
+            // Apply pending updates for the current commit
+            for (crate_name, origin) in &pending_stat_updates {
+                // Iterate immutably here
                 if let Some(stats) = crate_stats_map.get_mut(crate_name) {
+                    match origin {
+                        '+' | '>' => stats.lines_added += 1,
+                        '-' | '<' => stats.lines_deleted += 1,
+                        _ => {}
+                    }
+                }
+            }
+
+            for crate_name in touched_crates_in_commit {
+                if let Some(stats) = crate_stats_map.get_mut(&crate_name) {
                     stats.commit_touch_count += 1;
                 }
             }
-            processed_commit_count += 1;
         }
         tracing::info!(
-            count = processed_commit_count,
-            "Processed commits for volatility."
+            count = processed_commits,
+            "Finished processing commits for volatility stats."
         );
 
-        tracing::info!("Calculating volatility scores...");
         for (name, stats) in crate_stats_map.iter_mut() {
-            let churn = stats.lines_added + stats.lines_deleted;
-            stats.raw_score = stats.commit_touch_count as f64 + alpha * churn as f64;
-            tracing::debug!(
-                crate_name = name,
-                raw_score = stats.raw_score,
-                touches = stats.commit_touch_count,
-                churn = churn,
-                "Calculated raw score"
-            );
-            if normalize {
-                match self.calculate_loc_for_crate(&stats.root_path, &canonical_repo_path) {
-                    Ok(loc) => {
-                        stats.total_loc = Some(loc);
-                        if loc > 0 {
-                            stats.normalized_score = Some(stats.raw_score / loc as f64);
-                            tracing::debug!(
-                                crate_name = name,
-                                loc = loc,
-                                normalized_score = stats.normalized_score.unwrap_or_default(),
-                                "Calculated normalized score"
-                            );
-                        } else {
-                            stats.normalized_score = Some(stats.raw_score);
-                            tracing::warn!(crate_name = name, loc = loc, "Crate has 0 LoC. Normalized score set to raw score to avoid division by zero.");
-                        }
-                    }
+            if args.normalize {
+                match self.calculate_loc_for_crate(&stats.root_path, &analysis_path_canonical) {
+                    Ok(loc) => stats.total_loc = Some(loc),
                     Err(e) => {
-                        tracing::error!(crate_name = name, error = %e, "Failed to calculate LoC for crate. Skipping normalization for this crate.");
+                        tracing::warn!(
+                            crate_name = name,
+                            path = %stats.root_path.display(),
+                            error = %e,
+                            "Failed to calculate LoC for crate. Normalization might be affected."
+                        );
+                        stats.total_loc = None;
                     }
                 }
             }
-        }
-
-        tracing::debug!("Sorting crates by volatility score...");
-        let mut sorted_crates: Vec<(&String, &CrateStats)> = crate_stats_map.iter().collect();
-        if normalize {
-            sorted_crates.sort_by(|a, b| {
-                let score_a = a.1.normalized_score;
-                let score_b = b.1.normalized_score;
-                score_b
-                    .partial_cmp(&score_a)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-        } else {
-            sorted_crates.sort_by(|a, b| {
-                b.1.raw_score
-                    .partial_cmp(&a.1.raw_score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-        }
-
-        // Conditional output based on format
-        if output_format == "csv" {
-            println!("\nVolatility Report (CSV)");
-            println!("# Interpretation:");
-            println!("# - Volatility: Higher scores indicate more frequent or larger changes.");
-            println!("# - Crate Name: The name of the crate as defined in its Cargo.toml.");
-            println!("# - Birth Date: Approx. date (YYYY-MM-DD) the crate first appeared in history. Calculated from commit timestamp.");
-            println!("# - Commit Touch Count: Number of commits that modified this crate within the analysis window (since crate birth or global --since, whichever is later).");
-            println!(
-                "# - Lines Added: Total lines of code added to this crate during that period."
-            );
-            println!("# - Lines Deleted: Total lines of code deleted from this crate during that period.");
-            if normalize {
-                println!("# - Total LoC: Total non-blank lines of Rust code in the crate (used for normalization).");
-            }
-            println!("# - Raw Score: Calculated as 'Commit Touch Count + (alpha * (Lines Added + Lines Deleted))'. Alpha = {:.4}. A higher score indicates more recent change activity (commits and/or lines changed).", alpha);
-            if normalize {
-                println!("# - Normalized Score: 'Raw Score / Total LoC'. Shows volatility relative to crate size. May be N/A if LoC is 0 or not calculated. A higher score indicates more change activity relative to the crate's size.");
-            }
-
-            if normalize {
-                println!("crate_name,birth_date,commit_touch_count,lines_added,lines_deleted,total_loc,raw_score,normalized_score");
-            } else {
-                println!(
-                    "crate_name,birth_date,commit_touch_count,lines_added,lines_deleted,raw_score"
-                );
-            }
-            for (name, stats) in &sorted_crates {
-                let birth_date_str = stats.birth_commit_time.map_or_else(
-                    || "N/A".to_string(),
-                    |ts| {
-                        DateTime::from_timestamp(ts, 0).map_or_else(
-                            || "N/A".to_string(), // Fallback for CSV if timestamp is invalid
-                            |dt| dt.format("%Y-%m-%d").to_string(),
-                        )
-                    },
-                );
-                if normalize {
-                    println!(
-                        "{},{},{},{},{},{},{:.4},{:.4}",
-                        name,
-                        birth_date_str,
-                        stats.commit_touch_count,
-                        stats.lines_added,
-                        stats.lines_deleted,
-                        stats
-                            .total_loc
-                            .map_or_else(|| "N/A".to_string(), |loc| loc.to_string()),
-                        stats.raw_score,
-                        stats
-                            .normalized_score
-                            .map_or_else(|| "N/A".to_string(), |ns| format!("{:.4}", ns))
-                    );
-                } else {
-                    println!(
-                        "{},{},{},{},{},{:.4}",
-                        name,
-                        birth_date_str,
-                        stats.commit_touch_count,
-                        stats.lines_added,
-                        stats.lines_deleted,
-                        stats.raw_score
-                    );
+            stats.raw_score = (stats.lines_added + stats.lines_deleted) as f64
+                + args.alpha * stats.commit_touch_count as f64;
+            if let Some(loc) = stats.total_loc {
+                if loc > 0 {
+                    stats.normalized_score = Some(stats.raw_score / loc as f64);
                 }
             }
-        } else if output_format == "json" || output_format == "yaml" {
-            let output_data: Vec<CrateVolatilityDataForOutput> = sorted_crates
-                .iter()
-                .map(|(name, stats)| {
-                    let birth_date_str = stats.birth_commit_time.map_or_else(
-                        || "N/A".to_string(),
-                        |ts| {
-                            DateTime::from_timestamp(ts, 0).map_or_else(
-                                || "Invalid Date".to_string(),
-                                |dt| dt.format("%Y-%m-%d").to_string(),
-                            )
-                        },
-                    );
-                    CrateVolatilityDataForOutput {
+        }
+
+        // Sort crates by raw_score (descending) for display
+        let mut sorted_crates: Vec<_> = crate_stats_map.iter().collect();
+        sorted_crates.sort_by(|a, b| {
+            b.1.raw_score
+                .partial_cmp(&a.1.raw_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Print output based on format
+        match args.output.to_lowercase().as_str() {
+            "table" => self.print_volatility_table(&sorted_crates, args.normalize, args.alpha),
+            "json" | "yaml" => {
+                let output_data: Vec<CrateVolatilityDataForOutput> = sorted_crates
+                    .iter()
+                    .map(|(name, stats)| CrateVolatilityDataForOutput {
                         crate_name: name,
-                        birth_date: birth_date_str,
+                        birth_date: stats.birth_commit_time.map_or_else(
+                            || "N/A".to_string(),
+                            |ts| {
+                                DateTime::from_timestamp(ts, 0)
+                                    .unwrap_or_default()
+                                    .format("%Y-%m-%d")
+                                    .to_string()
+                            },
+                        ),
                         commit_touch_count: stats.commit_touch_count,
                         lines_added: stats.lines_added,
                         lines_deleted: stats.lines_deleted,
-                        total_loc: if normalize { stats.total_loc } else { None },
+                        total_loc: stats.total_loc,
                         raw_score: stats.raw_score,
-                        normalized_score: if normalize {
-                            stats.normalized_score
-                        } else {
-                            None
-                        },
-                    }
-                })
-                .collect();
+                        normalized_score: stats.normalized_score,
+                    })
+                    .collect();
 
-            if output_format == "json" {
-                let json_output = serde_json::to_string_pretty(&output_data)
-                    .context("Failed to serialize data to JSON")?;
-                println!("{}", json_output);
-            } else {
-                // output_format == "yaml"
-                let yaml_output = serde_yaml::to_string(&output_data)
-                    .context("Failed to serialize data to YAML")?;
-                println!("{}", yaml_output);
+                if args.output.to_lowercase() == "json" {
+                    println!("{}", serde_json::to_string_pretty(&output_data)?);
+                } else {
+                    println!("{}", serde_yaml::to_string(&output_data)?);
+                }
             }
-        } else {
-            // Default to table output
-            self.print_volatility_table(&sorted_crates, normalize, alpha);
+            _ => {
+                // Should be caught by clap value_parser, but as a safeguard:
+                return Err(anyhow::anyhow!(
+                    "Invalid output format specified: {}",
+                    args.output
+                ));
+            }
         }
-
-        tracing::info!("Volatility analysis complete. Report generated.");
-
         Ok(())
     }
 }

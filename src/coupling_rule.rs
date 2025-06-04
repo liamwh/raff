@@ -177,11 +177,28 @@ impl CouplingRule {
         &self,
         args: &CouplingArgs,
     ) -> Result<CrateLevelAnalysisResult> {
+        let analysis_path = &args.path;
+
+        if !analysis_path.exists() {
+            anyhow::bail!("Provided path does not exist: {}", analysis_path.display());
+        }
+        if !analysis_path.is_dir() {
+            anyhow::bail!(
+                "Provided path is not a directory: {}",
+                analysis_path.display()
+            );
+        }
+
+        tracing::info!(
+            "Analyzing coupling in directory: {}",
+            analysis_path.display()
+        );
+
         let metadata_output = Command::new("cargo")
             .arg("metadata")
             .arg("--format-version")
             .arg("1")
-            .current_dir(args.path.as_deref().unwrap_or("."))
+            .current_dir(analysis_path)
             .output()
             .context("Failed to execute cargo metadata")?;
 
@@ -304,7 +321,7 @@ impl CouplingRule {
         })
     }
 
-    #[tracing::instrument(level = "debug", skip(self), ret)]
+    #[tracing::instrument(level = "debug", skip(self, _pkg_data), ret)]
     fn analyze_module_level_coupling_for_crate(
         &self,
         crate_name: &str,

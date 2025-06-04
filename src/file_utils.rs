@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -6,18 +7,23 @@ use walkdir::WalkDir;
 /// # Parameters
 /// - `dir`: the directory (e.g. "./src") to walk.
 /// - `out_files`: a `Vec<PathBuf>` to push each discovered `.rs` file into.
-pub fn collect_all_rs(dir: &Path, out_files: &mut Vec<PathBuf>) {
-    for entry in WalkDir::new(dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-    {
-        if let Some(ext) = entry.path().extension() {
-            if ext == "rs" {
-                out_files.push(entry.into_path());
+///
+/// # Returns
+/// - `Ok(())` if successful.
+/// - `Err` if directory traversal fails.
+pub fn collect_all_rs(dir: &Path, out_files: &mut Vec<PathBuf>) -> Result<()> {
+    for entry_result in WalkDir::new(dir).into_iter() {
+        let entry = entry_result
+            .with_context(|| format!("Error walking directory entry in '{}'", dir.display()))?;
+        if entry.file_type().is_file() {
+            if let Some(ext) = entry.path().extension() {
+                if ext == "rs" {
+                    out_files.push(entry.into_path());
+                }
             }
         }
     }
+    Ok(())
 }
 
 /// Given a full file path (e.g. "/.../mycrate/src/foo/bar.rs") and the `src_dir` (e.g. "src"),
