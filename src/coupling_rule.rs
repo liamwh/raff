@@ -61,6 +61,7 @@ pub struct CrateCoupling {
     ce: usize,
     ca: usize,
     modules: Vec<ModuleCoupling>,
+    dependencies: HashSet<String>,
 }
 
 #[derive(Serialize, Debug, Default, Clone)]
@@ -68,6 +69,7 @@ pub struct ModuleCoupling {
     path: String,
     ce_m: usize,
     ca_m: usize,
+    module_dependencies: HashSet<String>,
 }
 
 #[derive(Serialize, Debug, Default)]
@@ -107,6 +109,7 @@ impl CouplingRule {
                         ce: 0,
                         ca: 0,
                         modules: Vec::new(),
+                        dependencies: HashSet::new(),
                     });
 
                 if matches!(
@@ -151,6 +154,9 @@ impl CouplingRule {
                 let html_output =
                     self.render_coupling_html_report(&full_report, &args.granularity, &args.path)?;
                 println!("{}", html_output);
+            }
+            CouplingOutputFormat::Dot => {
+                self.print_dot_report(&full_report, &args.granularity)?;
             }
         }
         Ok(())
@@ -217,6 +223,7 @@ impl CouplingRule {
                         ce: 0,
                         ca: 0,
                         modules: Vec::new(),
+                        dependencies: HashSet::new(),
                     },
                 );
             }
@@ -247,6 +254,11 @@ impl CouplingRule {
                                 *afferent_couplings
                                     .entry(target_pkg_name.clone())
                                     .or_insert(0) += 1;
+                                if let Some(coupling_data) =
+                                    crate_couplings_map.get_mut(origin_pkg_name)
+                                {
+                                    coupling_data.dependencies.insert(target_pkg_name.clone());
+                                }
                             }
                         }
                     }
@@ -274,6 +286,11 @@ impl CouplingRule {
                             *afferent_couplings
                                 .entry(target_pkg_name.clone())
                                 .or_insert(0) += 1;
+                            if let Some(coupling_data) =
+                                crate_couplings_map.get_mut(origin_pkg_name)
+                            {
+                                coupling_data.dependencies.insert(target_pkg_name.clone());
+                            }
                         }
                     }
                 }
@@ -304,13 +321,10 @@ impl CouplingRule {
         self.discover_modules(src_path, PathBuf::from("crate"), &mut module_map)?;
         let mut module_efferent_couplings: HashMap<String, HashSet<String>> = HashMap::new();
         let mut module_afferent_couplings: HashMap<String, HashSet<String>> = HashMap::new();
-        let mut module_results_map: BTreeMap<String, ModuleCoupling> = BTreeMap::new();
-
-        for mod_path_str in module_map.keys() {
-            module_efferent_couplings.insert(mod_path_str.clone(), HashSet::new());
-            module_afferent_couplings.insert(mod_path_str.clone(), HashSet::new());
-            module_results_map.insert(mod_path_str.clone(), ModuleCoupling::default());
-        }
+        let mut module_results_map: BTreeMap<String, ModuleCoupling> = module_map
+            .keys()
+            .map(|mod_path_str| (mod_path_str.clone(), ModuleCoupling::default()))
+            .collect();
 
         for (current_module_path_str, source_file_path) in &module_map {
             let content = fs::read_to_string(source_file_path).with_context(|| {
@@ -328,7 +342,14 @@ impl CouplingRule {
                         HashSet::new(),
                     );
                     visitor.visit_file(&ast);
-                    for referenced_module_path in visitor.dependencies {
+                    let collected_module_dependencies = visitor.dependencies;
+
+                    if let Some(coupling_data) = module_results_map.get_mut(current_module_path_str)
+                    {
+                        coupling_data.module_dependencies = collected_module_dependencies.clone();
+                    }
+
+                    for referenced_module_path in collected_module_dependencies {
                         if let Some(efferent_set) =
                             module_efferent_couplings.get_mut(current_module_path_str)
                         {
@@ -529,6 +550,189 @@ impl CouplingRule {
         Ok(html_utils::render_html_doc(&title, body_content))
     }
 
+    // New method for DOT output
+    #[tracing::instrument(level = "debug", skip(self, report, granularity))]
+    fn print_dot_report(
+        &self,
+        report: &CouplingReport,
+        granularity: &CouplingGranularity,
+    ) -> Result<()> {
+        if matches!(
+            granularity,
+            CouplingGranularity::Crate | CouplingGranularity::Both
+        ) {
+            let dot_string = self.generate_crate_dot(report)?;
+            println!("{}", dot_string);
+        }
+
+        if matches!(
+            granularity,
+            CouplingGranularity::Module | CouplingGranularity::Both
+        ) {
+            if matches!(granularity, CouplingGranularity::Both) {
+                println!(
+                    "
+
+"
+                ); // Separator if printing both
+            }
+            let dot_string = self.generate_module_dot(report)?;
+            println!("{}", dot_string);
+        }
+        Ok(())
+    }
+
+    // Helper to get color for DOT nodes
+    fn get_dot_color(value: f64, max_value: f64) -> String {
+        if max_value == 0.0 {
+            return "0.33,1.0,0.7".to_string(); // Light green for no coupling or single element
+        }
+        let normalized = (value / max_value).max(0.0).min(1.0); // Clamp between 0 and 1
+        let hue = 0.33 * (1.0 - normalized); // 0.33 (green) to 0.0 (red)
+        format!("{:.2},{:.1},{:.1}", hue, 1.0, 0.5) // HSL format
+    }
+
+    #[tracing::instrument(level = "debug", skip(self, report))]
+    fn generate_crate_dot(&self, report: &CouplingReport) -> Result<String> {
+        let mut dot = String::from("digraph CrateCoupling {\n");
+        dot.push_str("  rankdir=\"LR\";\n");
+        dot.push_str("  node [shape=box, style=filled];\n\n");
+
+        let max_coupling = report.crates.iter().map(|c| c.ce + c.ca).max().unwrap_or(0) as f64;
+
+        for crate_data in &report.crates {
+            let total_coupling = (crate_data.ce + crate_data.ca) as f64;
+            let color = Self::get_dot_color(total_coupling, max_coupling);
+            dot.push_str(&format!(
+                "  \"{}\" [label=\"{}\nCe: {}\nCa: {}\", fillcolor=\"{}\"];\n",
+                crate_data.name, crate_data.name, crate_data.ce, crate_data.ca, color
+            ));
+        }
+        dot.push('\n');
+
+        for crate_data in &report.crates {
+            for dep_name in &crate_data.dependencies {
+                dot.push_str(&format!("  \"{}\" -> \"{}\";\n", crate_data.name, dep_name));
+            }
+        }
+
+        dot.push_str("}\n");
+        Ok(dot)
+    }
+
+    #[tracing::instrument(level = "debug", skip(self, report))]
+    fn generate_module_dot(&self, report: &CouplingReport) -> Result<String> {
+        let mut dot = String::from("digraph ModuleCoupling {\n");
+        dot.push_str("  rankdir=\"LR\";\n");
+        dot.push_str("  node [shape=box, style=filled];\n");
+        dot.push_str("  compound=true; // Allow edges to clusters\n\n");
+
+        let max_module_coupling = report
+            .crates
+            .iter()
+            .flat_map(|c| &c.modules)
+            .map(|m| m.ce_m + m.ca_m)
+            .max()
+            .unwrap_or(0) as f64;
+
+        for crate_data in &report.crates {
+            if crate_data.modules.is_empty() {
+                continue;
+            }
+            dot.push_str(&format!("  subgraph \"cluster_{}\" {{\n", crate_data.name));
+            dot.push_str(&format!("    label = \"{}\";\n", crate_data.name));
+            dot.push_str("    style=filled;\n");
+            dot.push_str("    color=lightgrey;\n\n");
+
+            for module_data in &crate_data.modules {
+                let total_coupling = (module_data.ce_m + module_data.ca_m) as f64;
+                let color = Self::get_dot_color(total_coupling, max_module_coupling);
+                // Ensure module paths are suitable as DOT IDs (they should be if no spaces/special chars beyond ::)
+                // Full path for module: crate_name::module_path (if module_data.path is relative to crate)
+                // Current module_data.path is already like "crate_root" or "module::submodule"
+                // For DOT ID, ensure uniqueness. Prefix with crate name if path is not global.
+                // Module path seems to be "crate" or "crate::module" from discover_modules
+                // ModuleCoupling.path is "crate_root" or "module_name" (relative to crate)
+                // Let's form a globally unique ID for module nodes: CrateName::ModulePath
+                let module_node_id = if module_data.path == "crate_root" {
+                    format!("{}::ROOT", crate_data.name) // Ensure crate_root is unique per crate
+                } else {
+                    format!("{}::{}", crate_data.name, module_data.path)
+                };
+
+                dot.push_str(&format!(
+                    "    \"{}\" [label=\"{}\nCe_m: {}\nCa_m: {}\", fillcolor=\"{}\"];\n",
+                    module_node_id, module_data.path, module_data.ce_m, module_data.ca_m, color
+                ));
+            }
+            dot.push_str("  }\n\n");
+        }
+
+        for crate_data in &report.crates {
+            for module_data in &crate_data.modules {
+                let current_module_node_id = if module_data.path == "crate_root" {
+                    format!("{}::ROOT", crate_data.name)
+                } else {
+                    format!("{}::{}", crate_data.name, module_data.path)
+                };
+
+                for dep_mod_path_str in &module_data.module_dependencies {
+                    // dep_mod_path_str is a fully qualified path like "crate::module::sub"
+                    // We need to map this to the DOT node ID format (CrateName::ModulePath or CrateName::ROOT)
+                    // This requires knowing which crate dep_mod_path_str belongs to if it's an external dependency.
+                    // The current ModuleDependencyVisitor resolves paths within the *same* crate.
+                    // For cross-crate module dependencies, this DOT generation might be tricky without more info.
+                    // For now, assume module_dependencies are within the same crate or are self-contained FQNs.
+                    // If `dep_mod_path_str` starts with "crate::", it implies it's within the *current* crate being processed.
+                    // The ModuleDependencyVisitor resolves paths like `crate::foo`, `super::foo`, `self::foo`.
+                    // These are resolved to a path like "crate::actual_module_path".
+                    // So, `dep_mod_path_str` is effectively "crate::module_name_in_current_crate".
+                    // We need to replace the leading "crate" with the actual crate_data.name for the DOT ID.
+
+                    let target_module_node_id = if dep_mod_path_str.starts_with("crate::") {
+                        let path_suffix = dep_mod_path_str.trim_start_matches("crate::");
+                        if path_suffix.is_empty() || dep_mod_path_str == "crate" {
+                            // Dependency on the crate root
+                            format!("{}::ROOT", crate_data.name)
+                        } else {
+                            format!("{}::{}", crate_data.name, path_suffix)
+                        }
+                    } else if dep_mod_path_str == "crate" {
+                        // also crate root
+                        format!("{}::ROOT", crate_data.name)
+                    } else {
+                        // This case implies a path that isn't "crate::foo" or "crate".
+                        // It might be a fully qualified path from another crate if the visitor was extended,
+                        // or an unresolvable/external path. For now, we'll assume it's resolvable within the current crate.
+                        // If module paths are complex, this might need adjustment.
+                        // Let's assume dep_mod_path_str is relative to its crate root if not starting with "crate::"
+                        // However, ModuleDependencyVisitor normalizes them to start with "crate::" or be "crate"
+                        // So this 'else' branch should ideally not be hit for valid internal deps.
+                        // For robustness, we could try to find its original crate if we had a global module map.
+                        // Sticking to the assumption: dep_mod_path_str is like "crate::path" or "crate"
+                        // which is already handled by the above 'if'.
+                        // If it's something else, it might be an error or an external unhandled crate.
+                        // For now, we will assume all module dependencies are within the same crate.
+                        // This is a limitation of the current module dependency visitor.
+                        // Let's make it skip if it's not clearly from the current crate context:
+                        continue; // Or log a warning.
+                    };
+
+                    // Avoid self-loops in visualization if path resolves to same node id
+                    if current_module_node_id != target_module_node_id {
+                        dot.push_str(&format!(
+                            "  \"{}\" -> \"{}\";\n",
+                            current_module_node_id, target_module_node_id
+                        ));
+                    }
+                }
+            }
+        }
+
+        dot.push_str("}\n");
+        Ok(dot)
+    }
+
     #[tracing::instrument(level = "debug", skip(self, current_dir, base_mod_path, module_map))]
     fn discover_modules(
         &self,
@@ -658,7 +862,6 @@ impl<'a> Visit<'a> for ModuleDependencyVisitor<'a> {
 
             syn::visit::visit_item_mod(self, item_mod);
             self.current_module_path = original_path;
-        } else {
         }
     }
     fn visit_item_use(&mut self, i: &'a ItemUse) {

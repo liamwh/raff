@@ -1,0 +1,160 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Statement Count Report: ../P24287-Hybrid-Cloud-PaC/lib</title><style>body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    margin: 0;
+    padding: 20px;
+    background-color: #f4f7f6;
+}
+h1 {
+    color: #0056b3; /* Darker blue for main title */
+    text-align: center;
+    margin-bottom: 30px;
+}
+/* Base table styling */
+.sortable-table {
+    border-collapse: collapse;
+    width: 95%; /* More responsive width */
+    margin: 20px auto; /* Centered with some margin */
+    box-shadow: 0 2px 15px rgba(0,0,0,0.1); /* Subtle shadow for depth */
+    font-size: 0.9em; /* Slightly smaller font for more content */
+}
+.sortable-table caption {
+    caption-side: top;
+    text-align: left;
+    font-size: 1.2em;
+    font-weight: bold;
+    padding: 10px;
+    color: #333;
+}
+.sortable-table th, .sortable-table td {
+    border: 1px solid #ddd;
+    padding: 10px; /* Increased padding for better readability */
+    text-align: left;
+    min-width: 80px; /* Minimum width for cells */
+}
+/* Ensure th specific styling is for sortable-header if it needs to be */
+.sortable-table th.sortable-header {
+    background-color: #007bff; /* Bootstrap primary blue */
+    color: white;
+    cursor: pointer;
+    position: relative; /* For positioning sort indicators */
+    padding-right: 30px; /* More space for sort indicators */
+}
+.sortable-table th.sortable-header:hover {
+    background-color: #0056b3; /* Darker blue on hover */
+}
+/* Non-sortable headers, if any, might need their own simpler style */
+.sortable-table th:not(.sortable-header) {
+     background-color: #007bff;
+     color: white;
+     font-weight: bold; /* Default th styling */
+     padding: 10px 12px; /* Consistent padding */
+}
+.sortable-table tbody tr:nth-child(even) {
+    background-color: #f9f9f9; /* Zebra striping for rows */
+}
+.sortable-table tbody tr:hover {
+    background-color: #f1f1f1; /* Lighter grey on hover for data rows */
+}
+
+/* Sort indicators for .sortable-header */
+.sortable-header::before, .sortable-header::after {
+    content: '';
+    position: absolute;
+    right: 10px; /* Position within the increased padding */
+    border: 5px solid transparent;
+}
+.sortable-header::before { /* Upper arrow for asc */
+    top: calc(50% - 11px); /* Fine-tuned vertical position */
+    border-bottom-color: #ccc; /* Default arrow color (points up implies space for asc) */
+}
+.sortable-header::after { /* Lower arrow for desc */
+    top: calc(50% - 1px);  /* Fine-tuned vertical position */
+    border-top-color: #ccc; /* Default arrow color (points down implies space for desc) */
+}
+/* Active sort indicators */
+.sortable-header[data-sort-direction="asc"]::before {
+    border-bottom-color: white; /* Active sort color */
+}
+.sortable-header[data-sort-direction="desc"]::after {
+    border-top-color: white; /* Active sort color */
+}
+/* Styles for metric explanations */
+.metric-explanations {
+    list-style-type: none;
+    padding: 0;
+    margin: 20px auto;
+    width: 95%;
+}
+.metric-explanations li {
+    margin-bottom: 8px;
+    font-size: 0.9em;
+    line-height: 1.4;
+}
+.metric-explanations strong {
+    color: #007bff;
+}
+/* General cell styling for metrics */
+td.metric-cell {
+    text-align: right;
+}</style></head><body><h1>Statement Count Report: ../P24287-Hybrid-Cloud-PaC/lib</h1><ul class="metric-explanations"><li><strong>Component: </strong><span>Name of the top-level component (e.g., directory under src/, or crate name).</span></li><li><strong>File Count: </strong><span>Number of .rs files within this component.</span></li><li><strong>Statement Count: </strong><span>Total number of Rust statements counted in this component.</span></li><li><strong>Percentage: </strong><span>This component's statement count as a percentage of the grand total. Cells are colored red if this exceeds the threshold.</span></li></ul><table class="sortable-table"><caption>Analysis Path: ../P24287-Hybrid-Cloud-PaC/lib. Threshold: 10%</caption><thead><tr><th class="sortable-header" data-column-index="0" data-sort-type="string">Component</th><th class="sortable-header" data-column-index="1" data-sort-type="number">File Count</th><th class="sortable-header" data-column-index="2" data-sort-type="number">Statement Count</th><th class="sortable-header" data-column-index="3" data-sort-type="number">Percentage</th></tr></thead><tbody><tr><td>build-helper</td><td>1</td><td>24</td><td style="background-color: hsl(120, 100%, 80%);">0%</td></tr><tr><td>bundle</td><td>2</td><td>191</td><td style="background-color: hsl(120, 100%, 80%);">4%</td></tr><tr><td>cedar-entity</td><td>8</td><td>642</td><td style="background-color: hsl(0, 100%, 80%);">15%</td></tr><tr><td>common</td><td>49</td><td>693</td><td style="background-color: hsl(0, 100%, 80%);">17%</td></tr><tr><td>core</td><td>18</td><td>229</td><td style="background-color: hsl(120, 100%, 80%);">5%</td></tr><tr><td>decision-log</td><td>5</td><td>158</td><td style="background-color: hsl(120, 100%, 80%);">3%</td></tr><tr><td>evaluation</td><td>14</td><td>364</td><td style="background-color: hsl(120, 100%, 80%);">8%</td></tr><tr><td>event-sourcing</td><td>2</td><td>28</td><td style="background-color: hsl(120, 100%, 80%);">0%</td></tr><tr><td>health</td><td>4</td><td>89</td><td style="background-color: hsl(120, 100%, 80%);">2%</td></tr><tr><td>observability</td><td>18</td><td>507</td><td style="background-color: hsl(0, 100%, 80%);">12%</td></tr><tr><td>policy-management</td><td>11</td><td>556</td><td style="background-color: hsl(0, 100%, 80%);">13%</td></tr><tr><td>product-management</td><td>31</td><td>486</td><td style="background-color: hsl(0, 100%, 80%);">12%</td></tr><tr><td>reporting</td><td>6</td><td>62</td><td style="background-color: hsl(120, 100%, 80%);">1%</td></tr><tr><td>sapphire-sdk-rust</td><td>1</td><td>17</td><td style="background-color: hsl(120, 100%, 80%);">0%</td></tr></tbody></table><p><b>Grand Total Statements: 4046</b></p><p style="color: red;"><b>Warning: At least one component exceeds the 10% threshold.</b></p><script>document.addEventListener('DOMContentLoaded', function() {
+    const getCellValue = (tr, idx, type) => {
+        const cellContent = tr.children[idx].innerText || tr.children[idx].textContent;
+        if (type === 'number') {
+            const num = parseFloat(cellContent.replace(/[%$,]/g, ''));
+            return isNaN(num) ? -Infinity : num;
+        }
+        return cellContent.trim().toLowerCase();
+    };
+
+    const comparer = (idx, asc, type) => (a, b) => {
+        const vA = getCellValue(a, idx, type);
+        const vB = getCellValue(b, idx, type);
+        let comparison = 0;
+        if (type === 'number') {
+            comparison = vA - vB;
+        } else {
+            comparison = vA.toString().localeCompare(vB.toString());
+        }
+        return asc ? comparison : -comparison;
+    };
+
+    document.querySelectorAll('.sortable-table .sortable-header').forEach(th => {
+        th.addEventListener('click', (() => {
+            const table = th.closest('table');
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return;
+            const columnIndex = parseInt(th.dataset.columnIndex);
+            const sortType = th.dataset.sortType || 'string';
+            let currentAsc = th.classList.contains('sort-asc');
+            let newAsc;
+
+            table.querySelectorAll('.sortable-header').forEach(otherTh => {
+                if (otherTh === th) {
+                    if (th.dataset.sortDirection && th.dataset.sortDirection !== 'none') {
+                        newAsc = !currentAsc;
+                        th.dataset.sortDirection = newAsc ? 'asc' : 'desc';
+                    } else {
+                        newAsc = true;
+                        th.dataset.sortDirection = 'asc';
+                    }
+                    th.classList.toggle('sort-asc', newAsc);
+                    th.classList.toggle('sort-desc', !newAsc);
+                } else {
+                    otherTh.classList.remove('sort-asc', 'sort-desc');
+                    otherTh.dataset.sortDirection = 'none';
+                }
+            });
+            if (newAsc === undefined) { // Should not happen if th is the clicked element
+                newAsc = true;
+                th.dataset.sortDirection = 'asc';
+                th.classList.add('sort-asc');
+            }
+
+            Array.from(tbody.querySelectorAll('tr'))
+                .sort(comparer(columnIndex, newAsc, sortType))
+                .forEach(tr => tbody.appendChild(tr));
+        }));
+    });
+});</script></body></html>

@@ -101,6 +101,7 @@ pub enum CouplingOutputFormat {
     Json,
     Yaml,
     Html,
+    Dot,
 }
 
 /// Defines the granularity level for the coupling report.

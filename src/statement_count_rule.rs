@@ -1,6 +1,10 @@
 use anyhow::{bail, Context, Result};
-use maud::{html, Markup};
-use std::{collections::HashMap, fs, path::PathBuf};
+use maud::html;
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 use syn::visit::Visit;
 use syn::File as SynFile;
 
@@ -133,7 +137,7 @@ impl StatementCountRule {
         component_stats: &HashMap<String, (usize, usize)>,
         grand_total: usize,
         threshold: usize,
-        analysis_path: &PathBuf,
+        analysis_path: &Path,
     ) -> Result<String> {
         let title = format!("Statement Count Report: {}", analysis_path.display());
 

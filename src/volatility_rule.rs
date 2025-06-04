@@ -1,17 +1,16 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, TimeZone, Utc}; // For parsing --since date
-use git2::{DiffFormat, DiffOptions, Repository, Sort, TreeWalkMode, TreeWalkResult};
+use git2::{DiffOptions, Repository, Sort, TreeWalkMode, TreeWalkResult};
 use prettytable::{format, Cell, Row, Table}; // Added for table output
 use serde::Serialize; // Added for custom output struct
                       // Ensure serde_json is explicitly imported
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write; // Added for html_buffer
 use std::fs;
 use std::io::{BufRead, BufReader}; // For reading files line by line in LoC calculation
 use std::path::{Path, PathBuf};
 use toml::Value as TomlValue;
 // Added import for tracing
-use maud::{html, Markup};
+use maud::html;
 use walkdir::WalkDir; // For recursively finding Cargo.toml files // For parsing Cargo.toml
 
 use crate::cli::{VolatilityArgs, VolatilityOutputFormat}; // Ensure VolatilityOutputFormat is imported
@@ -551,10 +550,12 @@ impl VolatilityRule {
         let since_timestamp = args.since.as_ref().map_or(Ok(0_i64), |date_str| {
             NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
                 .map(|naive_date| {
-                    Utc.from_local_date(&naive_date)
-                        .unwrap()
-                        .and_hms_opt(0, 0, 0)
-                        .unwrap()
+                    let naive_datetime = naive_date.and_hms_opt(0, 0, 0).expect(
+                        "Internal error: Failed to create NaiveDateTime from NaiveDate at midnight",
+                    );
+                    Utc.from_local_datetime(&naive_datetime)
+                        .single()
+                        .expect("Internal error: Failed to convert NaiveDateTime to DateTime<Utc>")
                         .timestamp()
                 })
                 .map_err(|e| {

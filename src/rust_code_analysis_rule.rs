@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use prettytable::{format as pt_format, Attr, Cell, Row, Table};
 use serde::{Deserialize, Serialize};
 // use std::fmt::Write; // No longer needed for HTML buffer
-use maud::{html, Markup};
+use maud::html;
 use std::path::{Path, PathBuf};
 use tracing::instrument;
 
@@ -270,7 +270,7 @@ impl RustCodeAnalysisRule {
     fn render_rust_code_analysis_html_report(
         &self,
         analysis_results: &[AnalysisUnit],
-        project_root: &PathBuf,
+        project_root: &Path,
     ) -> Result<String> {
         let title = format!("Rust Code Analysis Report: {}", project_root.display());
 
@@ -332,7 +332,7 @@ impl RustCodeAnalysisRule {
         for unit in analysis_results {
             let full_path = PathBuf::from(&unit.name);
             let path_for_display = full_path
-                .strip_prefix(project_root.as_path())
+                .strip_prefix(project_root)
                 .map_or_else(|_| full_path.clone(), |p| p.to_path_buf());
             let relative_path_str = path_for_display.display().to_string();
             let mut aggregated_metrics = FileAggregatedMetrics::default();
@@ -477,7 +477,7 @@ impl RustCodeAnalysisRule {
 }
 
 // --- Updated Table Printing Logic ---
-fn print_analysis_table(analysis_results: &[AnalysisUnit], project_root: &PathBuf) -> Result<()> {
+fn print_analysis_table(analysis_results: &[AnalysisUnit], project_root: &Path) -> Result<()> {
     if analysis_results.is_empty() {
         println!("No analysis data to display in table.");
         return Ok(());
@@ -534,7 +534,7 @@ fn print_analysis_table(analysis_results: &[AnalysisUnit], project_root: &PathBu
     for unit in analysis_results {
         let full_path = PathBuf::from(&unit.name);
         let path_for_display = full_path
-            .strip_prefix(project_root.as_path())
+            .strip_prefix(project_root)
             .map(|stripped_ref| stripped_ref.to_path_buf())
             .unwrap_or_else(|_err| full_path.clone());
         let relative_path_str = path_for_display.display().to_string();
@@ -599,10 +599,8 @@ fn discover_src_directories(
         }
         let file_name = path.file_name().unwrap_or_default();
 
-        if e.file_type().is_dir() {
-            if file_name == "target" || file_name == "frontend" {
-                return false;
-            }
+        if e.file_type().is_dir() && (file_name == "target" || file_name == "frontend") {
+            return false;
         }
         true
     }) {

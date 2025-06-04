@@ -1,11 +1,11 @@
 [package]
-name = "rust-aff"
+name = "raff-cli"
 description = "Rust Architecture Fitness Functions"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "aff"
+name = "raff"
 path = "src/main.rs"
 
 [dependencies]

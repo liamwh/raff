@@ -1,0 +1,101 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    margin: 0;
+    padding: 20px;
+    background-color: #f4f7f6;
+}
+h1 {
+    color: #0056b3; /* Darker blue for main title */
+    text-align: center;
+    margin-bottom: 30px;
+}
+/* Base table styling */
+.sortable-table {
+    border-collapse: collapse;
+    width: 95%; /* More responsive width */
+    margin: 20px auto; /* Centered with some margin */
+    box-shadow: 0 2px 15px rgba(0,0,0,0.1); /* Subtle shadow for depth */
+    font-size: 0.9em; /* Slightly smaller font for more content */
+}
+.sortable-table caption {
+    caption-side: top;
+    text-align: left;
+    font-size: 1.2em;
+    font-weight: bold;
+    padding: 10px;
+    color: #333;
+}
+.sortable-table th, .sortable-table td {
+    border: 1px solid #ddd;
+    padding: 10px; /* Increased padding for better readability */
+    text-align: left;
+    min-width: 80px; /* Minimum width for cells */
+}
+/* Ensure th specific styling is for sortable-header if it needs to be */
+.sortable-table th.sortable-header {
+    background-color: #007bff; /* Bootstrap primary blue */
+    color: white;
+    cursor: pointer;
+    position: relative; /* For positioning sort indicators */
+    padding-right: 30px; /* More space for sort indicators */
+}
+.sortable-table th.sortable-header:hover {
+    background-color: #0056b3; /* Darker blue on hover */
+}
+/* Non-sortable headers, if any, might need their own simpler style */
+.sortable-table th:not(.sortable-header) {
+     background-color: #007bff;
+     color: white;
+     font-weight: bold; /* Default th styling */
+     padding: 10px 12px; /* Consistent padding */
+}
+.sortable-table tbody tr:nth-child(even) {
+    background-color: #f9f9f9; /* Zebra striping for rows */
+}
+.sortable-table tbody tr:hover {
+    background-color: #f1f1f1; /* Lighter grey on hover for data rows */
+}
+
+/* Sort indicators for .sortable-header */
+.sortable-header::before, .sortable-header::after {
+    content: '';
+    position: absolute;
+    right: 10px; /* Position within the increased padding */
+    border: 5px solid transparent;
+}
+.sortable-header::before { /* Upper arrow for asc */
+    top: calc(50% - 11px); /* Fine-tuned vertical position */
+    border-bottom-color: #ccc; /* Default arrow color (points up implies space for asc) */
+}
+.sortable-header::after { /* Lower arrow for desc */
+    top: calc(50% - 1px);  /* Fine-tuned vertical position */
+    border-top-color: #ccc; /* Default arrow color (points down implies space for desc) */
+}
+/* Active sort indicators */
+.sortable-header[data-sort-direction="asc"]::before {
+    border-bottom-color: white; /* Active sort color */
+}
+.sortable-header[data-sort-direction="desc"]::after {
+    border-top-color: white; /* Active sort color */
+}
+/* Styles for metric explanations */
+.metric-explanations {
+    list-style-type: none;
+    padding: 0;
+    margin: 20px auto;
+    width: 95%;
+}
+.metric-explanations li {
+    margin-bottom: 8px;
+    font-size: 0.9em;
+    line-height: 1.4;
+}
+.metric-explanations strong {
+    color: #007bff;
+}
+/* General cell styling for metrics */
+td.metric-cell {
+    text-align: right;
+}
