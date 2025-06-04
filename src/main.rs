@@ -4,6 +4,7 @@ mod cli;
 mod counter;
 mod coupling_rule;
 mod file_utils;
+mod html_utils;
 mod reporting;
 mod rust_code_analysis_rule;
 mod statement_count_rule;

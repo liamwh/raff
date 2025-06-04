@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
 use prettytable::{format, Attr, Cell, Row, Table};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::fmt::Write; // Added for html_buffer
+use std::path::{Path, PathBuf};
 use tracing::instrument;
 
 use crate::cli::{RustCodeAnalysisArgs, RustCodeAnalysisOutputFormat};
+use crate::html_utils; // Import the new HTML utilities
 
 // --- Structs for deserializing rust-code-analysis-cli JSON output ---
 
@@ -145,13 +147,13 @@ impl RustCodeAnalysisRule {
 
     #[instrument(skip(self, args), fields(output = ?args.output))]
     pub fn run(&self, args: &RustCodeAnalysisArgs) -> Result<()> {
-        let analysis_path = &args.path;
+        let analysis_path = PathBuf::from(&args.path);
 
         tracing::info!(
             "Starting directory discovery in: {}",
             analysis_path.display()
         );
-        let src_paths_args = discover_src_directories(analysis_path, args).with_context(|| {
+        let src_paths_args = discover_src_directories(&analysis_path, args).with_context(|| {
             format!(
                 "Failed to discover source directories in {}",
                 analysis_path.display()
@@ -242,7 +244,7 @@ impl RustCodeAnalysisRule {
 
         match args.output {
             RustCodeAnalysisOutputFormat::Table => {
-                print_analysis_table(&analysis_results, analysis_path)?;
+                print_analysis_table(&analysis_results, &analysis_path)?;
             }
             RustCodeAnalysisOutputFormat::Json => {
                 let pretty_json = serde_json::to_string_pretty(&analysis_results)
@@ -254,9 +256,254 @@ impl RustCodeAnalysisRule {
                     .context("Failed to serialize analysis results to YAML")?;
                 println!("{}", yaml_output);
             }
+            RustCodeAnalysisOutputFormat::Html => {
+                let html_output =
+                    self.print_rust_code_analysis_html_report(&analysis_results, &analysis_path)?;
+                println!("{}", html_output);
+            }
         }
 
         Ok(())
+    }
+
+    fn print_rust_code_analysis_html_report(
+        &self,
+        analysis_results: &[AnalysisUnit],
+        project_root: &PathBuf,
+    ) -> Result<String> {
+        let mut html_buffer = String::new();
+        html_utils::start_html_doc(
+            &mut html_buffer,
+            &format!("Rust Code Analysis Report: {}", project_root.display()),
+        )?;
+
+        let explanations = [
+            (
+                "File",
+                "Path to the analyzed file, relative to the project root.",
+            ),
+            (
+                "SLOC",
+                "Source Lines of Code. Higher may indicate a larger file.",
+            ),
+            (
+                "PLOC",
+                "Physical Lines of Code. Higher may indicate a larger file.",
+            ),
+            (
+                "LLOC",
+                "Logical Lines of Code. Higher may indicate more complex logic.",
+            ),
+            ("CLOC", "Comment Lines of Code."),
+            ("Blank", "Blank Lines."),
+            (
+                "Cyc Sum",
+                "Cyclomatic Complexity Sum. Higher is more complex (worse).",
+            ),
+            (
+                "Cyc Avg",
+                "Cyclomatic Complexity Average. Higher is more complex (worse).",
+            ),
+            (
+                "H Len",
+                "Halstead Length. Higher indicates more operators/operands.",
+            ),
+            (
+                "H Vocab",
+                "Halstead Vocabulary. Higher indicates more unique operators/operands.",
+            ),
+            (
+                "H Vol",
+                "Halstead Volume. Higher indicates larger program size (worse).",
+            ),
+            (
+                "H Effort",
+                "Halstead Effort. Higher indicates more mental effort (worse).",
+            ),
+            (
+                "H Time",
+                "Halstead Time (sec). Higher indicates longer development time (worse).",
+            ),
+            (
+                "H Bugs",
+                "Halstead Bugs. Higher indicates more potential bugs (worse).",
+            ),
+        ];
+        html_utils::write_metric_explanation_list(&mut html_buffer, &explanations)?;
+
+        html_utils::start_table(&mut html_buffer, Some("Detailed Metrics per File"))?;
+        let headers = [
+            "File", "SLOC", "PLOC", "LLOC", "CLOC", "Blank", "Cyc Sum", "Cyc Avg", "H Len",
+            "H Vocab", "H Vol", "H Effort", "H Time", "H Bugs",
+        ];
+        html_utils::add_table_header(&mut html_buffer, &headers)?;
+
+        // Collect all aggregated metrics first to determine ranges for color scaling
+        let mut aggregated_metrics_list: Vec<(String, FileAggregatedMetrics)> = Vec::new();
+        for unit in analysis_results {
+            let full_path = PathBuf::from(&unit.name);
+            let path_for_display = full_path
+                .strip_prefix(project_root.as_path())
+                .map_or_else(|_| full_path.clone(), |p| p.to_path_buf());
+            let relative_path_str = path_for_display.display().to_string();
+
+            let mut aggregated_metrics = FileAggregatedMetrics::default();
+            aggregate_metrics_recursive(&unit.spaces, &mut aggregated_metrics);
+            aggregated_metrics_list.push((relative_path_str, aggregated_metrics));
+        }
+
+        // Create MetricRanges for each relevant column
+        let sloc_ranges = html_utils::MetricRanges::from_values(
+            &aggregated_metrics_list
+                .iter()
+                .map(|(_, m)| m.sloc)
+                .collect::<Vec<f64>>(),
+            false,
+        );
+        let ploc_ranges = html_utils::MetricRanges::from_values(
+            &aggregated_metrics_list
+                .iter()
+                .map(|(_, m)| m.ploc)
+                .collect::<Vec<f64>>(),
+            false,
+        );
+        let lloc_ranges = html_utils::MetricRanges::from_values(
+            &aggregated_metrics_list
+                .iter()
+                .map(|(_, m)| m.lloc)
+                .collect::<Vec<f64>>(),
+            false,
+        );
+        let cyc_sum_ranges = html_utils::MetricRanges::from_values(
+            &aggregated_metrics_list
+                .iter()
+                .map(|(_, m)| m.cyclomatic_sum)
+                .collect::<Vec<f64>>(),
+            false,
+        );
+        let cyc_avg_values: Vec<f64> = aggregated_metrics_list
+            .iter()
+            .map(|(_, m)| {
+                if m.items_with_metrics > 0 {
+                    m.cyclomatic_sum / m.items_with_metrics as f64
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let cyc_avg_ranges = html_utils::MetricRanges::from_values(&cyc_avg_values, false);
+        let h_len_ranges = html_utils::MetricRanges::from_values(
+            &aggregated_metrics_list
+                .iter()
+                .map(|(_, m)| m.halstead_length)
+                .collect::<Vec<f64>>(),
+            false,
+        );
+        let h_vocab_ranges = html_utils::MetricRanges::from_values(
+            &aggregated_metrics_list
+                .iter()
+                .map(|(_, m)| m.halstead_vocabulary)
+                .collect::<Vec<f64>>(),
+            false,
+        );
+        let h_vol_ranges = html_utils::MetricRanges::from_values(
+            &aggregated_metrics_list
+                .iter()
+                .map(|(_, m)| m.halstead_volume)
+                .collect::<Vec<f64>>(),
+            false,
+        );
+        let h_effort_ranges = html_utils::MetricRanges::from_values(
+            &aggregated_metrics_list
+                .iter()
+                .map(|(_, m)| m.halstead_effort)
+                .collect::<Vec<f64>>(),
+            false,
+        );
+        let h_time_ranges = html_utils::MetricRanges::from_values(
+            &aggregated_metrics_list
+                .iter()
+                .map(|(_, m)| m.halstead_time)
+                .collect::<Vec<f64>>(),
+            false,
+        );
+        let h_bugs_ranges = html_utils::MetricRanges::from_values(
+            &aggregated_metrics_list
+                .iter()
+                .map(|(_, m)| m.halstead_bugs)
+                .collect::<Vec<f64>>(),
+            false,
+        );
+
+        for (relative_path_str, metrics) in &aggregated_metrics_list {
+            let cyclomatic_avg = if metrics.items_with_metrics > 0 {
+                metrics.cyclomatic_sum / metrics.items_with_metrics as f64
+            } else {
+                0.0
+            };
+
+            let cells_content = vec![
+                relative_path_str.clone(),
+                format!("{:.0}", metrics.sloc),
+                format!("{:.0}", metrics.ploc),
+                format!("{:.0}", metrics.lloc),
+                format!("{:.0}", metrics.cloc),  // No color
+                format!("{:.0}", metrics.blank), // No color
+                format!("{:.0}", metrics.cyclomatic_sum),
+                format!("{:.1}", cyclomatic_avg),
+                format!("{:.0}", metrics.halstead_length),
+                format!("{:.0}", metrics.halstead_vocabulary),
+                format!("{:.1}", metrics.halstead_volume),
+                format!("{:.0}", metrics.halstead_effort),
+                format!("{:.1}", metrics.halstead_time),
+                format!("{:.2}", metrics.halstead_bugs),
+            ];
+
+            let cell_styles = vec![
+                String::new(), // File
+                sloc_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(metrics.sloc, r)
+                }),
+                ploc_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(metrics.ploc, r)
+                }),
+                lloc_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(metrics.lloc, r)
+                }),
+                String::new(), // CLOC
+                String::new(), // Blank
+                cyc_sum_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(metrics.cyclomatic_sum, r)
+                }),
+                cyc_avg_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(cyclomatic_avg, r)
+                }),
+                h_len_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(metrics.halstead_length, r)
+                }),
+                h_vocab_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(metrics.halstead_vocabulary, r)
+                }),
+                h_vol_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(metrics.halstead_volume, r)
+                }),
+                h_effort_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(metrics.halstead_effort, r)
+                }),
+                h_time_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(metrics.halstead_time, r)
+                }),
+                h_bugs_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(metrics.halstead_bugs, r)
+                }),
+            ];
+            html_utils::add_table_row(&mut html_buffer, &cells_content, Some(&cell_styles))?;
+        }
+
+        html_utils::end_table_body(&mut html_buffer)?;
+        html_utils::end_table(&mut html_buffer)?;
+        html_utils::end_html_doc(&mut html_buffer)?;
+        Ok(html_buffer)
     }
 }
 

@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use prettytable::{Cell, Row, Table};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -9,13 +10,14 @@ use syn::{visit::Visit, ExprPath, Item, ItemMod, ItemUse, PatType};
 use walkdir::WalkDir;
 
 use crate::cli::{CouplingArgs, CouplingGranularity, CouplingOutputFormat};
+use crate::html_utils;
 use crate::table_utils::get_default_table_format;
 
 #[derive(Debug, Deserialize, Clone)]
 struct CargoMetadata {
     packages: Vec<Package>,
     workspace_members: Vec<String>,
-    resolve: Option<Resolve>, // Optional: only present if --no-deps is NOT used
+    resolve: Option<Resolve>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -27,30 +29,13 @@ struct Package {
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Hash, Clone)]
-struct PkgId(String); // To use package id string in HashSet
+struct PkgId(String);
 
 #[derive(Debug, Deserialize, Clone)]
 struct Dependency {
     name: String,
-    // The actual package id this dependency resolves to is not directly here with --no-deps.
-    // We need to match by name with workspace_members or rely on resolve graph if available.
-    // For inter-workspace dependencies, pkg_id is usually not present in this dependency struct itself.
-    // Instead, cargo metadata --no-deps gives a flat list of packages.
-    // We will iterate over a package's dependencies and check if the dependency *name*
-    // corresponds to another workspace package.
-    // The `pkg` field in dependency is often not populated with --no-deps.
-    // We'll need to look up the dependency name in the list of all packages.
-    // However, cargo metadata's `dependencies` objects do not have a direct `id` field to link
-    // to the `id` field in the top-level `packages` array when using `--no-deps`.
-    // The `id` field of a package is of the form "pkg_name version (path/url)".
-    // The `workspace_members` array contains these full IDs.
-    // For a dependency listed in a package, we typically get its `name`.
-    // We need to find a workspace package whose `name` matches the dependency's `name`.
 }
 
-// Only used if we don't use --no-deps, which is not the primary strategy here for Step A.1.
-// However, if --no-deps proves insufficient for resolving package IDs for dependencies,
-// we might need to parse the resolve graph.
 #[derive(Debug, Deserialize, Clone)]
 struct Resolve {
     nodes: Vec<ResolveNode>,
@@ -58,12 +43,9 @@ struct Resolve {
 
 #[derive(Debug, Deserialize, Clone)]
 struct ResolveNode {
-    id: String, // Package ID
-    dependencies: Vec<String>, // List of Package IDs this node depends on
-                // deps: Vec<ResolveDep>, // Alternative structure for dependencies with names
+    id: String,
+    dependencies: Vec<String>,
 }
-
-// --- New Data Structures for Coupling Report ---
 
 #[derive(Debug)]
 struct CrateLevelAnalysisResult {
@@ -76,16 +58,16 @@ struct CrateLevelAnalysisResult {
 #[derive(Serialize, Debug, Clone)]
 pub struct CrateCoupling {
     name: String,
-    ce: usize, // Efferent Couplings
-    ca: usize, // Afferent Couplings
+    ce: usize,
+    ca: usize,
     modules: Vec<ModuleCoupling>,
 }
 
 #[derive(Serialize, Debug, Default, Clone)]
 pub struct ModuleCoupling {
-    path: String, // Module path, e.g., "crate_root", "utils", "services::auth"
-    ce_m: usize,  // Module Efferent Couplings
-    ca_m: usize,  // Module Afferent Couplings
+    path: String,
+    ce_m: usize,
+    ca_m: usize,
 }
 
 #[derive(Serialize, Debug, Default)]
@@ -127,7 +109,6 @@ impl CouplingRule {
                         modules: Vec::new(),
                     });
 
-                // Conditionally run module analysis
                 if matches!(
                     args.granularity,
                     CouplingGranularity::Module | CouplingGranularity::Both
@@ -140,7 +121,6 @@ impl CouplingRule {
                                 .analyze_module_level_coupling_for_crate(
                                     crate_name, &src_path, pkg_data,
                                 )?;
-                            // Sort modules by total coupling (ce_m + ca_m) descending
                             module_couplings
                                 .sort_by(|a, b| (b.ce_m + b.ca_m).cmp(&(a.ce_m + a.ca_m)));
                             current_crate_coupling.modules = module_couplings;
@@ -151,7 +131,6 @@ impl CouplingRule {
             }
         }
 
-        // Sort crates by total coupling (ce + ca) descending
         full_report
             .crates
             .sort_by(|a, b| (b.ce + b.ca).cmp(&(a.ce + a.ca)));
@@ -168,6 +147,11 @@ impl CouplingRule {
                 let yaml = serde_yaml::to_string(&full_report)?;
                 println!("{}", yaml);
             }
+            CouplingOutputFormat::Html => {
+                let html_output =
+                    self.print_coupling_html_report(&full_report, &args.granularity, &args.path)?;
+                println!("{}", html_output);
+            }
         }
         Ok(())
     }
@@ -178,7 +162,6 @@ impl CouplingRule {
         args: &CouplingArgs,
     ) -> Result<CrateLevelAnalysisResult> {
         let analysis_path = &args.path;
-
         if !analysis_path.exists() {
             anyhow::bail!("Provided path does not exist: {}", analysis_path.display());
         }
@@ -188,7 +171,6 @@ impl CouplingRule {
                 analysis_path.display()
             );
         }
-
         tracing::info!(
             "Analyzing coupling in directory: {}",
             analysis_path.display()
@@ -201,12 +183,10 @@ impl CouplingRule {
             .current_dir(analysis_path)
             .output()
             .context("Failed to execute cargo metadata")?;
-
         if !metadata_output.status.success() {
             let stderr = String::from_utf8_lossy(&metadata_output.stderr);
             anyhow::bail!("cargo metadata failed: {}", stderr);
         }
-
         let metadata_json = String::from_utf8_lossy(&metadata_output.stdout);
         let metadata: CargoMetadata =
             serde_json::from_str(&metadata_json).context("Failed to parse cargo metadata JSON")?;
@@ -230,7 +210,6 @@ impl CouplingRule {
             if let Some(name) = package_id_to_name.get(pkg_id) {
                 efferent_couplings.insert(name.clone(), 0);
                 afferent_couplings.insert(name.clone(), 0);
-                // Initialize CrateCoupling entry
                 crate_couplings_map.insert(
                     name.clone(),
                     CrateCoupling {
@@ -249,13 +228,11 @@ impl CouplingRule {
                 .iter()
                 .map(|n| (n.id.clone(), n))
                 .collect();
-
             for origin_pkg_id_str in workspace_packages_map.keys() {
                 let origin_pkg_name = match package_id_to_name.get(origin_pkg_id_str) {
                     Some(name) => name,
                     None => continue,
                 };
-
                 if let Some(resolve_node) = resolve_nodes_map.get(origin_pkg_id_str) {
                     for dep_pkg_id_str in &resolve_node.dependencies {
                         if workspace_member_ids.contains(dep_pkg_id_str) {
@@ -263,9 +240,7 @@ impl CouplingRule {
                                 Some(name) => name,
                                 None => continue,
                             };
-
                             if origin_pkg_name != target_pkg_name {
-                                // Avoid self-dependency for Ce/Ca
                                 *efferent_couplings
                                     .entry(origin_pkg_name.clone())
                                     .or_insert(0) += 1;
@@ -283,7 +258,6 @@ impl CouplingRule {
                 .values()
                 .map(|p| (p.name.clone(), p.id.clone()))
                 .collect();
-
             for (origin_pkg_id_str, origin_pkg_data) in &workspace_packages_map {
                 let origin_pkg_name = &origin_pkg_data.name;
                 for dep in &origin_pkg_data.dependencies {
@@ -294,7 +268,6 @@ impl CouplingRule {
                                 .find(|p| &p.id == target_pkg_id_str)
                                 .map(|p| &p.name)
                                 .unwrap_or_else(|| &dep.name);
-
                             *efferent_couplings
                                 .entry(origin_pkg_name.clone())
                                 .or_insert(0) += 1;
@@ -307,7 +280,6 @@ impl CouplingRule {
             }
         }
 
-        // Populate the CrateCoupling structs
         for (name, coupling_data) in crate_couplings_map.iter_mut() {
             coupling_data.ce = *efferent_couplings.get(name).unwrap_or(&0);
             coupling_data.ca = *afferent_couplings.get(name).unwrap_or(&0);
@@ -330,25 +302,20 @@ impl CouplingRule {
     ) -> Result<Vec<ModuleCoupling>> {
         let mut module_map: HashMap<String, PathBuf> = HashMap::new();
         self.discover_modules(src_path, PathBuf::from("crate"), &mut module_map)?;
-
         let mut module_efferent_couplings: HashMap<String, HashSet<String>> = HashMap::new();
         let mut module_afferent_couplings: HashMap<String, HashSet<String>> = HashMap::new();
-
-        // BTreeMap for initial path-sorted processing before final coupling sort
         let mut module_results_map: BTreeMap<String, ModuleCoupling> = BTreeMap::new();
 
         for mod_path_str in module_map.keys() {
             module_efferent_couplings.insert(mod_path_str.clone(), HashSet::new());
             module_afferent_couplings.insert(mod_path_str.clone(), HashSet::new());
             module_results_map.insert(mod_path_str.clone(), ModuleCoupling::default());
-            // Store in BTreeMap
         }
 
         for (current_module_path_str, source_file_path) in &module_map {
             let content = fs::read_to_string(source_file_path).with_context(|| {
                 format!("Failed to read module file: {}", source_file_path.display())
             })?;
-
             match syn::parse_file(&content) {
                 Ok(ast) => {
                     let mut visitor = ModuleDependencyVisitor::new(
@@ -361,7 +328,6 @@ impl CouplingRule {
                         HashSet::new(),
                     );
                     visitor.visit_file(&ast);
-
                     for referenced_module_path in visitor.dependencies {
                         if let Some(efferent_set) =
                             module_efferent_couplings.get_mut(current_module_path_str)
@@ -376,15 +342,11 @@ impl CouplingRule {
                     }
                 }
                 Err(err) => {
-                    eprintln!(
-                        "Warning: Failed to parse module {} at {}: {}. Skipping for module analysis.",
-                        current_module_path_str, source_file_path.display(), err
-                    );
+                    eprintln!("Warning: Failed to parse module {} at {}: {}. Skipping for module analysis.", current_module_path_str, source_file_path.display(), err);
                 }
             }
         }
 
-        // Populate coupling data into the BTreeMap values
         for (mod_path, coupling_data) in module_results_map.iter_mut() {
             coupling_data.path = if mod_path == "crate" {
                 "crate_root".to_string()
@@ -398,8 +360,6 @@ impl CouplingRule {
                 .get(mod_path)
                 .map_or(0, |s| s.len());
         }
-
-        // Collect into Vec for sorting by coupling (original BTreeMap was by path)
         Ok(module_results_map.into_values().collect())
     }
 
@@ -415,13 +375,11 @@ impl CouplingRule {
             println!("[Crate level]");
             let mut crate_table = Table::new();
             crate_table.set_format(get_default_table_format());
-
             crate_table.set_titles(Row::new(vec![
                 Cell::new("Crate Name"),
                 Cell::new("Ce (Efferent)"),
                 Cell::new("Ca (Afferent)"),
             ]));
-
             for crate_data in &report.crates {
                 crate_table.add_row(Row::new(vec![
                     Cell::new(&crate_data.name),
@@ -444,21 +402,17 @@ impl CouplingRule {
                         CouplingGranularity::Crate | CouplingGranularity::Both
                     ) && !first_module_table
                     {
-                        println!(); // Add a newline if crate table was printed and this isn't the first module table
+                        println!();
                     } else if first_module_table
                         && matches!(granularity, CouplingGranularity::Module)
                     {
-                        // No newline if only module view and it's the first table
                     } else if !first_module_table {
-                        println!(); // Add a newline between module tables when only module view
+                        println!();
                     }
-
                     println!("[Module level: {}]", crate_data.name);
                     first_module_table = false;
-
                     let mut module_table = Table::new();
                     module_table.set_format(get_default_table_format());
-
                     module_table.set_titles(Row::new(vec![
                         Cell::new("  Module Path"),
                         Cell::new("Ce_m (Efferent)"),
@@ -476,6 +430,108 @@ impl CouplingRule {
             }
         }
         Ok(())
+    }
+
+    fn print_coupling_html_report(
+        &self,
+        report: &CouplingReport,
+        granularity: &CouplingGranularity,
+        analysis_path: &PathBuf,
+    ) -> Result<String> {
+        let mut html_buffer = String::new();
+        html_utils::start_html_doc(
+            &mut html_buffer,
+            &format!("Coupling Report: {}", analysis_path.display()),
+        )?;
+
+        let explanations = [
+            ("Ce (Efferent Coupling)", "Number of other components that this component depends on. Higher is generally worse."),
+            ("Ca (Afferent Coupling)", "Number of other components that depend on this component. Higher indicates more responsibility, can be good or bad depending on context but often indicates potential impact of changes."),
+        ];
+        html_utils::write_metric_explanation_list(&mut html_buffer, &explanations)?;
+
+        if matches!(
+            granularity,
+            CouplingGranularity::Crate | CouplingGranularity::Both
+        ) {
+            html_utils::start_table(&mut html_buffer, Some("Crate Level Coupling"))?;
+            html_utils::add_table_header(
+                &mut html_buffer,
+                &["Crate Name", "Ce (Efferent)", "Ca (Afferent)"],
+            )?;
+
+            let ce_values: Vec<f64> = report.crates.iter().map(|c| c.ce as f64).collect();
+            let ca_values: Vec<f64> = report.crates.iter().map(|c| c.ca as f64).collect();
+            let ce_ranges = html_utils::MetricRanges::from_values(&ce_values, false);
+            let ca_ranges = html_utils::MetricRanges::from_values(&ca_values, false);
+
+            for crate_data in &report.crates {
+                let cells = vec![
+                    crate_data.name.clone(),
+                    crate_data.ce.to_string(),
+                    crate_data.ca.to_string(),
+                ];
+                let cell_styles = vec![
+                    String::new(),
+                    ce_ranges.as_ref().map_or_else(String::new, |r| {
+                        html_utils::get_metric_cell_style(crate_data.ce as f64, r)
+                    }),
+                    ca_ranges.as_ref().map_or_else(String::new, |r| {
+                        html_utils::get_metric_cell_style(crate_data.ca as f64, r)
+                    }),
+                ];
+                html_utils::add_table_row(&mut html_buffer, &cells, Some(&cell_styles))?;
+            }
+            html_utils::end_table_body(&mut html_buffer)?;
+            html_utils::end_table(&mut html_buffer)?;
+        }
+
+        if matches!(
+            granularity,
+            CouplingGranularity::Module | CouplingGranularity::Both
+        ) {
+            for crate_data in &report.crates {
+                if !crate_data.modules.is_empty() {
+                    html_utils::start_table(
+                        &mut html_buffer,
+                        Some(&format!("Module Level Coupling: {}", crate_data.name)),
+                    )?;
+                    html_utils::add_table_header(
+                        &mut html_buffer,
+                        &["Module Path", "Ce_m (Efferent)", "Ca_m (Afferent)"],
+                    )?;
+
+                    let ce_m_values: Vec<f64> =
+                        crate_data.modules.iter().map(|m| m.ce_m as f64).collect();
+                    let ca_m_values: Vec<f64> =
+                        crate_data.modules.iter().map(|m| m.ca_m as f64).collect();
+                    let ce_m_ranges = html_utils::MetricRanges::from_values(&ce_m_values, false);
+                    let ca_m_ranges = html_utils::MetricRanges::from_values(&ca_m_values, false);
+
+                    for module_data in &crate_data.modules {
+                        let cells = vec![
+                            format!("  {}", module_data.path),
+                            module_data.ce_m.to_string(),
+                            module_data.ca_m.to_string(),
+                        ];
+                        let cell_styles = vec![
+                            String::new(),
+                            ce_m_ranges.as_ref().map_or_else(String::new, |r| {
+                                html_utils::get_metric_cell_style(module_data.ce_m as f64, r)
+                            }),
+                            ca_m_ranges.as_ref().map_or_else(String::new, |r| {
+                                html_utils::get_metric_cell_style(module_data.ca_m as f64, r)
+                            }),
+                        ];
+                        html_utils::add_table_row(&mut html_buffer, &cells, Some(&cell_styles))?;
+                    }
+                    html_utils::end_table_body(&mut html_buffer)?;
+                    html_utils::end_table(&mut html_buffer)?;
+                }
+            }
+        }
+        html_utils::end_html_doc(&mut html_buffer)?;
+        Ok(html_buffer)
     }
 
     #[tracing::instrument(level = "debug", skip(self, current_dir, base_mod_path, module_map))]
@@ -496,7 +552,6 @@ impl CouplingRule {
                 self.discover_inline_modules(&main_rs, "crate", module_map)?;
             }
         }
-
         for entry in WalkDir::new(current_dir).min_depth(1).max_depth(1) {
             let entry = entry.with_context(|| {
                 format!(
@@ -506,7 +561,6 @@ impl CouplingRule {
             })?;
             let path = entry.path();
             let file_name = entry.file_name().to_string_lossy();
-
             if path.is_dir() {
                 let mod_name = file_name.into_owned();
                 let mod_rs_path = path.join("mod.rs");
@@ -520,7 +574,6 @@ impl CouplingRule {
                 } else {
                     format!("{}::{}", base_mod_path.to_string_lossy(), mod_name)
                 };
-
                 if mod_rs_path.exists() {
                     module_map.insert(new_base_mod_path_str.clone(), mod_rs_path.clone());
                     self.discover_inline_modules(&mod_rs_path, &new_base_mod_path_str, module_map)?;
@@ -582,10 +635,7 @@ impl CouplingRule {
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: Failed to parse {} for inline modules: {}. Skipping inline scan for this file.",
-                    file_path.display(), e
-                );
+                eprintln!("Warning: Failed to parse {} for inline modules: {}. Skipping inline scan for this file.", file_path.display(), e);
             }
         }
         Ok(())
@@ -612,33 +662,23 @@ impl<'a> Visit<'a> for ModuleDependencyVisitor<'a> {
             {
                 self.current_module_path.push(mod_name);
             } else {
-                // This logic might need to be smarter if current_module_path is already deep
-                // For file-level modules, current_module_path is already set correctly before visitor is called.
-                // This is for inline `mod foo { ... }`
-                // If current_module_path is ["crate", "parent"], new one is ["crate", "parent", "foo"]
                 self.current_module_path.push(mod_name);
             }
             syn::visit::visit_item_mod(self, item_mod);
-            self.current_module_path = original_path; // Restore path after visiting inline module
+            self.current_module_path = original_path;
         } else {
-            // For `mod foo;` declarations, we don't need to change path or visit content here,
-            // as `discover_modules` handles them by finding the respective file/directory.
-            // syn::visit::visit_item_mod(self, item_mod); // Default visit might still be useful for attrs etc.
         }
     }
-
     fn visit_item_use(&mut self, i: &'a ItemUse) {
         self.add_dependency_from_path_tree(&i.tree);
         syn::visit::visit_item_use(self, i);
     }
-
     fn visit_expr_path(&mut self, expr: &'a ExprPath) {
         if let Some(resolved_path) = self.resolve_path(&expr.path) {
             self.dependencies.insert(resolved_path);
         }
         syn::visit::visit_expr_path(self, expr);
     }
-
     fn visit_pat_type(&mut self, pt: &'a PatType) {
         if let syn::Type::Path(type_path) = &*pt.ty {
             if let Some(resolved_path) = self.resolve_path(&type_path.path) {
@@ -663,7 +703,6 @@ impl<'a> ModuleDependencyVisitor<'a> {
             dependencies,
         }
     }
-
     fn add_dependency_from_path_tree(&mut self, tree: &'a syn::UseTree) {
         match tree {
             syn::UseTree::Path(use_path) => {
@@ -690,7 +729,6 @@ impl<'a> ModuleDependencyVisitor<'a> {
             }
         }
     }
-
     fn collect_path_segments_from_tree(&self, tree: &'a syn::UseTree) -> Vec<&'a syn::Ident> {
         let mut segments = Vec::new();
         let mut current_tree = tree;
@@ -709,7 +747,6 @@ impl<'a> ModuleDependencyVisitor<'a> {
         }
         segments
     }
-
     fn resolve_path(&self, path: &'a syn::Path) -> Option<String> {
         if path.leading_colon.is_some()
             && (path.segments.is_empty() || path.segments[0].ident != "crate")
@@ -719,7 +756,6 @@ impl<'a> ModuleDependencyVisitor<'a> {
         let segments: Vec<&syn::Ident> = path.segments.iter().map(|s| &s.ident).collect();
         self.resolve_path_from_segments(segments.into_iter())
     }
-
     fn resolve_path_from_segments<I>(&self, segments_iter: I) -> Option<String>
     where
         I: Iterator<Item = &'a syn::Ident> + Clone,
@@ -728,10 +764,8 @@ impl<'a> ModuleDependencyVisitor<'a> {
         if segments.is_empty() {
             return None;
         }
-
         let mut resolved_path_parts: Vec<String> = Vec::new();
         let first_segment = &segments[0];
-
         match first_segment.as_str() {
             "crate" => {
                 resolved_path_parts.push("crate".to_string());
@@ -770,7 +804,6 @@ impl<'a> ModuleDependencyVisitor<'a> {
                 }
             }
         }
-
         let mut current_check_path = resolved_path_parts.clone();
         while !current_check_path.is_empty() {
             let path_str = current_check_path.join("::");
@@ -784,7 +817,6 @@ impl<'a> ModuleDependencyVisitor<'a> {
         }
         None
     }
-
     fn is_valid_module_prefix(&self, path_parts: &[String]) -> bool {
         let query_prefix = path_parts.join("::");
         if path_parts.is_empty() {

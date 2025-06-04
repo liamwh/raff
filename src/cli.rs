@@ -28,6 +28,15 @@ pub enum Commands {
     RustCodeAnalysis(RustCodeAnalysisArgs),
 }
 
+/// Enum representing the supported output formats for the statement count report.
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum StatementCountOutputFormat {
+    #[default]
+    Table,
+    Html,
+    // Potentially Json, Yaml in the future if detailed data is useful
+}
+
 /// Arguments for the `statement-count` subcommand.
 #[derive(Args, Debug)]
 pub struct StatementCountArgs {
@@ -39,6 +48,21 @@ pub struct StatementCountArgs {
     /// If any component > this percent, exit non-zero.
     #[clap(long, default_value_t = 10)]
     pub threshold: usize,
+
+    /// Output format for the report.
+    #[clap(long, value_enum, default_value_t = StatementCountOutputFormat::default())]
+    pub output: StatementCountOutputFormat,
+}
+
+/// Enum representing the supported output formats for the volatility report.
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum VolatilityOutputFormat {
+    #[default]
+    Table,
+    Csv,
+    Json,
+    Yaml,
+    Html,
 }
 
 /// Arguments for the `volatility` subcommand.
@@ -65,17 +89,18 @@ pub struct VolatilityArgs {
     pub skip_merges: bool,
 
     /// Output format for the report.
-    #[clap(long, value_parser = ["table", "csv", "json", "yaml"], default_value = "table")]
-    pub output: String,
+    #[clap(long, value_enum, default_value_t = VolatilityOutputFormat::default())]
+    pub output: VolatilityOutputFormat,
 }
 
 /// Enum representing the supported output formats for the coupling report.
 #[derive(ValueEnum, Clone, Debug, Default)]
 pub enum CouplingOutputFormat {
-    #[default] // Make 'table' the default
+    #[default]
     Table,
     Json,
     Yaml,
+    Html,
 }
 
 /// Defines the granularity level for the coupling report.
@@ -98,7 +123,7 @@ pub struct CouplingArgs {
     pub path: std::path::PathBuf,
 
     /// Output format for the coupling report.
-    #[clap(long, value_enum, default_value_t = CouplingOutputFormat::Table)]
+    #[clap(long, value_enum, default_value_t = CouplingOutputFormat::default())]
     pub output: CouplingOutputFormat,
 
     /// Granularity of the coupling report.
@@ -109,10 +134,11 @@ pub struct CouplingArgs {
 /// Output format for the rust-code-analysis subcommand.
 #[derive(ValueEnum, Clone, Debug, Default)]
 pub enum RustCodeAnalysisOutputFormat {
-    #[default] // Make 'table' the default
+    #[default]
     Table,
     Json,
     Yaml,
+    Html,
 }
 
 /// Arguments for the `rust-code-analysis` subcommand.

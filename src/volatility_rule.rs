@@ -5,6 +5,7 @@ use prettytable::{format, Cell, Row, Table}; // Added for table output
 use serde::Serialize; // Added for custom output struct
                       // Ensure serde_json is explicitly imported
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write; // Added for html_buffer
 use std::fs;
 use std::io::{BufRead, BufReader}; // For reading files line by line in LoC calculation
 use std::path::{Path, PathBuf};
@@ -12,7 +13,8 @@ use toml::Value as TomlValue;
 // Added import for tracing
 use walkdir::WalkDir; // For recursively finding Cargo.toml files // For parsing Cargo.toml
 
-use crate::cli::VolatilityArgs; // Import the specific args struct
+use crate::cli::{VolatilityArgs, VolatilityOutputFormat}; // Ensure VolatilityOutputFormat is imported
+use crate::html_utils; // Import the new HTML utilities
 
 /// Represents the statistics gathered for a single crate.
 #[derive(Debug, Default, Clone)] // Clone is useful for initialization
@@ -271,8 +273,8 @@ impl VolatilityRule {
 
         let mut table = Table::new();
         let table_format = format::FormatBuilder::new()
-            .column_separator('│')
-            .borders('│')
+            .column_separator('|')
+            .borders('|')
             .separators(
                 &[format::LinePosition::Top],
                 format::LineSeparator::new('─', '┬', '┌', '┐'),
@@ -370,35 +372,30 @@ impl VolatilityRule {
         let mut crates_needing_birth_time = crate_stats_map.len();
 
         for oid_result in revwalk {
-            let oid = oid_result.context("Failed to get OID from birth-time revwalk")?;
+            let oid = oid_result.with_context(|| "Failed to get OID from birth-time revwalk")?;
             let commit = repo
                 .find_commit(oid)
-                .context("Failed to find commit from OID in birth-time revwalk")?;
+                .with_context(|| "Failed to find commit from OID in birth-time revwalk")?;
             let commit_time = commit.time().seconds();
             let tree = commit
                 .tree()
-                .context("Failed to get tree for commit in birth-time revwalk")?;
+                .with_context(|| "Failed to get tree for commit in birth-time revwalk")?;
 
             tracing::trace!(commit_oid = %commit.id(), commit_time, "Scanning commit for crate births");
 
             for (crate_name, stats) in crate_stats_map.iter_mut() {
                 if stats.birth_commit_time.is_none() {
-                    let mut found_in_this_commit = false;
                     tree.walk(TreeWalkMode::PreOrder, |path_from_tree_root, entry| {
                         let entry_path_relative_to_repo = Path::new(path_from_tree_root).join(entry.name().unwrap_or_default());
 
                         if entry_path_relative_to_repo.starts_with(&stats.root_path) {
-                            found_in_this_commit = true;
                             stats.birth_commit_time = Some(commit_time);
                             tracing::debug!(%crate_name, commit_oid = %commit.id(), %commit_time, path_found = %entry_path_relative_to_repo.display(), "Set birth time for crate");
                             crates_needing_birth_time -= 1;
                             return TreeWalkResult::Skip;
                         }
                         TreeWalkResult::Ok
-                    }).context(format!("Error walking tree for commit {} to find birth of crate {}", commit.id(), crate_name))?;
-
-                    // No specific action needed here if found_in_this_commit is true,
-                    // as birth_commit_time is set and crates_needing_birth_time is decremented inside closure.
+                    }).with_context(|| format!("Error walking tree for commit {} to find birth of crate {}", commit.id(), crate_name))?;
                 }
             }
 
@@ -418,6 +415,151 @@ impl VolatilityRule {
 
         tracing::info!("Finished populating crate birth times.");
         Ok(())
+    }
+
+    fn print_volatility_html_report(
+        &self,
+        sorted_crates: &[(&String, &CrateStats)],
+        normalize: bool,
+        alpha: f64,
+        analysis_path_canonical: &Path,
+    ) -> Result<String> {
+        let mut html_buffer = String::new();
+        html_utils::start_html_doc(
+            &mut html_buffer,
+            &format!("Volatility Report: {}", analysis_path_canonical.display()),
+        )?;
+
+        let mut metric_explanations = vec![
+            ("Crate Name", "The name of the crate as defined in its Cargo.toml."),
+            ("Birth Date", "Approx. date (YYYY-MM-DD) the crate first appeared in history."),
+            ("Touches", "Number of commits that modified this crate within the analysis window. Higher is more volatile."),
+            ("Added", "Total lines of code added to this crate. Higher is more volatile."),
+            ("Deleted", "Total lines of code deleted from this crate. Higher is more volatile."),
+        ];
+        if normalize {
+            metric_explanations.push((
+                "Total LoC",
+                "Total non-blank lines of Rust code in the crate (used for normalization).",
+            ));
+        }
+
+        let raw_score_explanation = format!("Calculated as 'Touches + (alpha * (Added + Deleted))'. Alpha = {:.4}. Higher score indicates more change activity.", alpha);
+        metric_explanations.push(("Raw Score", &raw_score_explanation));
+
+        if normalize {
+            metric_explanations.push(("Norm Score", "'Raw Score / Total LoC'. Volatility relative to crate size. Higher is more volatile."));
+        }
+        html_utils::write_metric_explanation_list(&mut html_buffer, &metric_explanations)?;
+
+        html_utils::start_table(
+            &mut html_buffer,
+            Some(&format!(
+                "Volatility Metrics (Alpha: {:.4}, Normalized: {})",
+                alpha, normalize
+            )),
+        )?;
+
+        let mut headers = vec!["Crate Name", "Birth Date", "Touches", "Added", "Deleted"];
+        if normalize {
+            headers.push("Total LoC");
+        }
+        headers.push("Raw Score");
+        if normalize {
+            headers.push("Norm Score");
+        }
+        html_utils::add_table_header(&mut html_buffer, &headers)?;
+
+        // Prepare MetricRanges for color scaling
+        let touches_values: Vec<f64> = sorted_crates
+            .iter()
+            .map(|(_, s)| s.commit_touch_count as f64)
+            .collect();
+        let added_values: Vec<f64> = sorted_crates
+            .iter()
+            .map(|(_, s)| s.lines_added as f64)
+            .collect();
+        let deleted_values: Vec<f64> = sorted_crates
+            .iter()
+            .map(|(_, s)| s.lines_deleted as f64)
+            .collect();
+        let raw_score_values: Vec<f64> = sorted_crates.iter().map(|(_, s)| s.raw_score).collect();
+        let norm_score_values: Vec<f64> = sorted_crates
+            .iter()
+            .filter_map(|(_, s)| s.normalized_score)
+            .collect();
+
+        let touches_ranges = html_utils::MetricRanges::from_values(&touches_values, false); // false: higher is worse
+        let added_ranges = html_utils::MetricRanges::from_values(&added_values, false);
+        let deleted_ranges = html_utils::MetricRanges::from_values(&deleted_values, false);
+        let raw_score_ranges = html_utils::MetricRanges::from_values(&raw_score_values, false);
+        let norm_score_ranges = html_utils::MetricRanges::from_values(&norm_score_values, false);
+
+        for (name, stats) in sorted_crates {
+            let birth_date_str = stats.birth_commit_time.map_or_else(
+                || "N/A".to_string(),
+                |ts| {
+                    DateTime::from_timestamp(ts, 0).map_or_else(
+                        || "Invalid Date".to_string(),
+                        |dt| dt.format("%Y-%m-%d").to_string(),
+                    )
+                },
+            );
+
+            let mut cells_content = vec![
+                name.to_string(),
+                birth_date_str,
+                stats.commit_touch_count.to_string(),
+                stats.lines_added.to_string(),
+                stats.lines_deleted.to_string(),
+            ];
+            let mut cell_styles = vec![
+                String::new(), // Crate Name
+                String::new(), // Birth Date
+                touches_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(stats.commit_touch_count as f64, r)
+                }),
+                added_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(stats.lines_added as f64, r)
+                }),
+                deleted_ranges.as_ref().map_or_else(String::new, |r| {
+                    html_utils::get_metric_cell_style(stats.lines_deleted as f64, r)
+                }),
+            ];
+
+            if normalize {
+                cells_content.push(
+                    stats
+                        .total_loc
+                        .map_or_else(|| "N/A".to_string(), |loc| loc.to_string()),
+                );
+                cell_styles.push(String::new()); // Total LoC - no specific color coding, or could be size-based if desired
+            }
+            cells_content.push(format!("{:.2}", stats.raw_score));
+            cell_styles.push(raw_score_ranges.as_ref().map_or_else(String::new, |r| {
+                html_utils::get_metric_cell_style(stats.raw_score, r)
+            }));
+
+            if normalize {
+                cells_content.push(
+                    stats
+                        .normalized_score
+                        .map_or_else(|| "N/A".to_string(), |ns| format!("{:.2}", ns)),
+                );
+                cell_styles.push(norm_score_ranges.as_ref().map_or_else(String::new, |r| {
+                    stats.normalized_score.map_or_else(String::new, |ns_val| {
+                        html_utils::get_metric_cell_style(ns_val, r)
+                    })
+                }));
+            }
+
+            html_utils::add_table_row(&mut html_buffer, &cells_content, Some(&cell_styles))?;
+        }
+
+        html_utils::end_table_body(&mut html_buffer)?;
+        html_utils::end_table(&mut html_buffer)?;
+        html_utils::end_html_doc(&mut html_buffer)?;
+        Ok(html_buffer)
     }
 
     #[tracing::instrument(level = "debug", skip_all, err)]
@@ -595,9 +737,13 @@ impl VolatilityRule {
         });
 
         // Print output based on format
-        match args.output.to_lowercase().as_str() {
-            "table" => self.print_volatility_table(&sorted_crates, args.normalize, args.alpha),
-            "json" | "yaml" => {
+        match &args.output {
+            VolatilityOutputFormat::Table => {
+                self.print_volatility_table(&sorted_crates, args.normalize, args.alpha)
+            }
+            output_format @ (VolatilityOutputFormat::Json
+            | VolatilityOutputFormat::Yaml
+            | VolatilityOutputFormat::Csv) => {
                 let output_data: Vec<CrateVolatilityDataForOutput> = sorted_crates
                     .iter()
                     .map(|(name, stats)| CrateVolatilityDataForOutput {
@@ -620,18 +766,63 @@ impl VolatilityRule {
                     })
                     .collect();
 
-                if args.output.to_lowercase() == "json" {
-                    println!("{}", serde_json::to_string_pretty(&output_data)?);
-                } else {
-                    println!("{}", serde_yaml::to_string(&output_data)?);
+                match output_format {
+                    VolatilityOutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&output_data)?);
+                    }
+                    VolatilityOutputFormat::Yaml => {
+                        println!("{}", serde_yaml::to_string(&output_data)?);
+                    }
+                    VolatilityOutputFormat::Csv => {
+                        let mut csv_output = String::new();
+                        let mut headers = vec![
+                            "crate_name",
+                            "birth_date",
+                            "commit_touch_count",
+                            "lines_added",
+                            "lines_deleted",
+                            "raw_score",
+                        ];
+                        if args.normalize {
+                            headers.insert(5, "total_loc");
+                            headers.push("normalized_score");
+                        }
+                        writeln!(csv_output, "{}", headers.join(","))?;
+                        for item in output_data {
+                            let mut row = vec![
+                                item.crate_name.to_string(),
+                                item.birth_date,
+                                item.commit_touch_count.to_string(),
+                                item.lines_added.to_string(),
+                                item.lines_deleted.to_string(),
+                            ];
+                            if args.normalize {
+                                row.push(
+                                    item.total_loc.map_or_else(String::new, |v| v.to_string()),
+                                );
+                            }
+                            row.push(format!("{:.2}", item.raw_score));
+                            if args.normalize {
+                                row.push(
+                                    item.normalized_score
+                                        .map_or_else(String::new, |v| format!("{:.2}", v)),
+                                );
+                            }
+                            writeln!(csv_output, "{}", row.join(","))?;
+                        }
+                        print!("{}", csv_output);
+                    }
+                    _ => unreachable!(), // Other variants handled by outer match
                 }
             }
-            _ => {
-                // Should be caught by clap value_parser, but as a safeguard:
-                return Err(anyhow::anyhow!(
-                    "Invalid output format specified: {}",
-                    args.output
-                ));
+            VolatilityOutputFormat::Html => {
+                let html_output = self.print_volatility_html_report(
+                    &sorted_crates,
+                    args.normalize,
+                    args.alpha,
+                    &analysis_path_canonical,
+                )?;
+                println!("{}", html_output);
             }
         }
         Ok(())
