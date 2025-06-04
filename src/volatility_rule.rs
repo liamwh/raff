@@ -11,6 +11,7 @@ use std::io::{BufRead, BufReader}; // For reading files line by line in LoC calc
 use std::path::{Path, PathBuf};
 use toml::Value as TomlValue;
 // Added import for tracing
+use maud::{html, Markup};
 use walkdir::WalkDir; // For recursively finding Cargo.toml files // For parsing Cargo.toml
 
 use crate::cli::{VolatilityArgs, VolatilityOutputFormat}; // Ensure VolatilityOutputFormat is imported
@@ -417,20 +418,16 @@ impl VolatilityRule {
         Ok(())
     }
 
-    fn print_volatility_html_report(
+    fn render_volatility_html_report(
         &self,
         sorted_crates: &[(&String, &CrateStats)],
         normalize: bool,
         alpha: f64,
         analysis_path_canonical: &Path,
     ) -> Result<String> {
-        let mut html_buffer = String::new();
-        html_utils::start_html_doc(
-            &mut html_buffer,
-            &format!("Volatility Report: {}", analysis_path_canonical.display()),
-        )?;
+        let title = format!("Volatility Report: {}", analysis_path_canonical.display());
 
-        let mut metric_explanations = vec![
+        let mut metric_explanations_data = vec![
             ("Crate Name", "The name of the crate as defined in its Cargo.toml."),
             ("Birth Date", "Approx. date (YYYY-MM-DD) the crate first appeared in history."),
             ("Touches", "Number of commits that modified this crate within the analysis window. Higher is more volatile."),
@@ -438,37 +435,18 @@ impl VolatilityRule {
             ("Deleted", "Total lines of code deleted from this crate. Higher is more volatile."),
         ];
         if normalize {
-            metric_explanations.push((
+            metric_explanations_data.push((
                 "Total LoC",
                 "Total non-blank lines of Rust code in the crate (used for normalization).",
             ));
         }
-
-        let raw_score_explanation = format!("Calculated as 'Touches + (alpha * (Added + Deleted))'. Alpha = {:.4}. Higher score indicates more change activity.", alpha);
-        metric_explanations.push(("Raw Score", &raw_score_explanation));
-
+        let raw_score_explanation_string = format!("Calculated as 'Touches + (alpha * (Added + Deleted))'. Alpha = {:.4}. Higher score indicates more change activity.", alpha);
+        metric_explanations_data.push(("Raw Score", &raw_score_explanation_string));
         if normalize {
-            metric_explanations.push(("Norm Score", "'Raw Score / Total LoC'. Volatility relative to crate size. Higher is more volatile."));
+            metric_explanations_data.push(("Norm Score", "'Raw Score / Total LoC'. Volatility relative to crate size. Higher is more volatile."));
         }
-        html_utils::write_metric_explanation_list(&mut html_buffer, &metric_explanations)?;
-
-        html_utils::start_table(
-            &mut html_buffer,
-            Some(&format!(
-                "Volatility Metrics (Alpha: {:.4}, Normalized: {})",
-                alpha, normalize
-            )),
-        )?;
-
-        let mut headers = vec!["Crate Name", "Birth Date", "Touches", "Added", "Deleted"];
-        if normalize {
-            headers.push("Total LoC");
-        }
-        headers.push("Raw Score");
-        if normalize {
-            headers.push("Norm Score");
-        }
-        html_utils::add_table_header(&mut html_buffer, &headers)?;
+        let explanations_markup =
+            html_utils::render_metric_explanation_list(&metric_explanations_data);
 
         // Prepare MetricRanges for color scaling
         let touches_values: Vec<f64> = sorted_crates
@@ -489,77 +467,66 @@ impl VolatilityRule {
             .filter_map(|(_, s)| s.normalized_score)
             .collect();
 
-        let touches_ranges = html_utils::MetricRanges::from_values(&touches_values, false); // false: higher is worse
+        let touches_ranges = html_utils::MetricRanges::from_values(&touches_values, false);
         let added_ranges = html_utils::MetricRanges::from_values(&added_values, false);
         let deleted_ranges = html_utils::MetricRanges::from_values(&deleted_values, false);
         let raw_score_ranges = html_utils::MetricRanges::from_values(&raw_score_values, false);
         let norm_score_ranges = html_utils::MetricRanges::from_values(&norm_score_values, false);
 
-        for (name, stats) in sorted_crates {
-            let birth_date_str = stats.birth_commit_time.map_or_else(
-                || "N/A".to_string(),
-                |ts| {
-                    DateTime::from_timestamp(ts, 0).map_or_else(
-                        || "Invalid Date".to_string(),
-                        |dt| dt.format("%Y-%m-%d").to_string(),
-                    )
-                },
-            );
-
-            let mut cells_content = vec![
-                name.to_string(),
-                birth_date_str,
-                stats.commit_touch_count.to_string(),
-                stats.lines_added.to_string(),
-                stats.lines_deleted.to_string(),
-            ];
-            let mut cell_styles = vec![
-                String::new(), // Crate Name
-                String::new(), // Birth Date
-                touches_ranges.as_ref().map_or_else(String::new, |r| {
-                    html_utils::get_metric_cell_style(stats.commit_touch_count as f64, r)
-                }),
-                added_ranges.as_ref().map_or_else(String::new, |r| {
-                    html_utils::get_metric_cell_style(stats.lines_added as f64, r)
-                }),
-                deleted_ranges.as_ref().map_or_else(String::new, |r| {
-                    html_utils::get_metric_cell_style(stats.lines_deleted as f64, r)
-                }),
-            ];
-
-            if normalize {
-                cells_content.push(
-                    stats
-                        .total_loc
-                        .map_or_else(|| "N/A".to_string(), |loc| loc.to_string()),
-                );
-                cell_styles.push(String::new()); // Total LoC - no specific color coding, or could be size-based if desired
+        let table_markup = html! {
+            table class="sortable-table" {
+                caption { (format!("Volatility Metrics (Alpha: {:.4}, Normalized: {})", alpha, normalize)) }
+                thead {
+                    tr {
+                        th class="sortable-header" data-column-index="0" data-sort-type="string" { "Crate Name" }
+                        th class="sortable-header" data-column-index="1" data-sort-type="string" { "Birth Date" }
+                        th class="sortable-header" data-column-index="2" data-sort-type="number" { "Touches" }
+                        th class="sortable-header" data-column-index="3" data-sort-type="number" { "Added" }
+                        th class="sortable-header" data-column-index="4" data-sort-type="number" { "Deleted" }
+                        @if normalize {
+                            th class="sortable-header" data-column-index="5" data-sort-type="number" { "Total LoC" }
+                            th class="sortable-header" data-column-index="6" data-sort-type="number" { "Raw Score" }
+                            th class="sortable-header" data-column-index="7" data-sort-type="number" { "Norm Score" }
+                        } @else {
+                            th class="sortable-header" data-column-index="5" data-sort-type="number" { "Raw Score" }
+                        }
+                    }
+                }
+                tbody {
+                    @for (name, stats) in sorted_crates {
+                        @let birth_date_str = stats.birth_commit_time.map_or_else(
+                            || "N/A".to_string(),
+                            |ts| DateTime::from_timestamp(ts, 0).map_or_else(
+                                || "Invalid Date".to_string(),
+                                |dt| dt.format("%Y-%m-%d").to_string()
+                            )
+                        );
+                        tr {
+                            td { (name) }
+                            td { (birth_date_str) }
+                            td style=({touches_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(stats.commit_touch_count as f64, r))}) { (stats.commit_touch_count) }
+                            td style=({added_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(stats.lines_added as f64, r))}) { (stats.lines_added) }
+                            td style=({deleted_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(stats.lines_deleted as f64, r))}) { (stats.lines_deleted) }
+                            @if normalize {
+                                td { (stats.total_loc.map_or_else(|| "N/A".to_string(), |loc| loc.to_string())) }
+                                td style=({raw_score_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(stats.raw_score, r))}) { (format!("{:.2}", stats.raw_score)) }
+                                td style=({norm_score_ranges.as_ref().map_or_else(String::new, |r| stats.normalized_score.map_or_else(String::new, |ns_val| html_utils::get_metric_cell_style(ns_val,r)))})
+                                   { (stats.normalized_score.map_or_else(|| "N/A".to_string(), |ns| format!("{:.2}", ns))) }
+                            } @else {
+                                td style=({raw_score_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(stats.raw_score, r))}) { (format!("{:.2}", stats.raw_score)) }
+                            }
+                        }
+                    }
+                }
             }
-            cells_content.push(format!("{:.2}", stats.raw_score));
-            cell_styles.push(raw_score_ranges.as_ref().map_or_else(String::new, |r| {
-                html_utils::get_metric_cell_style(stats.raw_score, r)
-            }));
+        };
 
-            if normalize {
-                cells_content.push(
-                    stats
-                        .normalized_score
-                        .map_or_else(|| "N/A".to_string(), |ns| format!("{:.2}", ns)),
-                );
-                cell_styles.push(norm_score_ranges.as_ref().map_or_else(String::new, |r| {
-                    stats.normalized_score.map_or_else(String::new, |ns_val| {
-                        html_utils::get_metric_cell_style(ns_val, r)
-                    })
-                }));
-            }
+        let body_content = html! {
+            (explanations_markup)
+            (table_markup)
+        };
 
-            html_utils::add_table_row(&mut html_buffer, &cells_content, Some(&cell_styles))?;
-        }
-
-        html_utils::end_table_body(&mut html_buffer)?;
-        html_utils::end_table(&mut html_buffer)?;
-        html_utils::end_html_doc(&mut html_buffer)?;
-        Ok(html_buffer)
+        Ok(html_utils::render_html_doc(&title, body_content))
     }
 
     #[tracing::instrument(level = "debug", skip_all, err)]
@@ -774,8 +741,11 @@ impl VolatilityRule {
                         println!("{}", serde_yaml::to_string(&output_data)?);
                     }
                     VolatilityOutputFormat::Csv => {
-                        let mut csv_output = String::new();
-                        let mut headers = vec![
+                        let mut wtr = csv::WriterBuilder::new()
+                            .has_headers(true)
+                            .from_writer(vec![]);
+                        // Write header conditionally
+                        let mut headers_vec = vec![
                             "crate_name",
                             "birth_date",
                             "commit_touch_count",
@@ -784,39 +754,40 @@ impl VolatilityRule {
                             "raw_score",
                         ];
                         if args.normalize {
-                            headers.insert(5, "total_loc");
-                            headers.push("normalized_score");
+                            headers_vec.insert(5, "total_loc");
+                            headers_vec.push("normalized_score");
                         }
-                        writeln!(csv_output, "{}", headers.join(","))?;
+                        wtr.write_record(&headers_vec)?;
                         for item in output_data {
-                            let mut row = vec![
+                            let mut record = vec![
                                 item.crate_name.to_string(),
-                                item.birth_date,
+                                item.birth_date.to_string(),
                                 item.commit_touch_count.to_string(),
                                 item.lines_added.to_string(),
                                 item.lines_deleted.to_string(),
                             ];
                             if args.normalize {
-                                row.push(
+                                record.push(
                                     item.total_loc.map_or_else(String::new, |v| v.to_string()),
                                 );
                             }
-                            row.push(format!("{:.2}", item.raw_score));
+                            record.push(format!("{:.2}", item.raw_score));
                             if args.normalize {
-                                row.push(
+                                record.push(
                                     item.normalized_score
                                         .map_or_else(String::new, |v| format!("{:.2}", v)),
                                 );
                             }
-                            writeln!(csv_output, "{}", row.join(","))?;
+                            wtr.write_record(&record)?;
                         }
-                        print!("{}", csv_output);
+                        let csv_string = String::from_utf8(wtr.into_inner()?)?;
+                        println!("{}", csv_string);
                     }
                     _ => unreachable!(), // Other variants handled by outer match
                 }
             }
             VolatilityOutputFormat::Html => {
-                let html_output = self.print_volatility_html_report(
+                let html_output = self.render_volatility_html_report(
                     &sorted_crates,
                     args.normalize,
                     args.alpha,

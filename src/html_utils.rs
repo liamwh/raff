@@ -1,121 +1,157 @@
-use anyhow::Result;
-use std::fmt::Write;
+use maud::{html, Markup, PreEscaped, DOCTYPE};
 
-const HTML_HEAD_CONTENT: &str = r#"
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Analysis Report</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            background-color: #f4f4f4;
-            color: #333;
-            padding: 20px;
-        }
-        h1 {
-            color: #333;
-            text-align: center;
-        }
-        table {
-            width: 90%;
-            margin: 20px auto;
-            border-collapse: collapse;
-            box-shadow: 0 2px 15px rgba(0,0,0,0.1);
-            background-color: white;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 10px 12px;
-            text-align: left;
-        }
-        th {
-            background-color: #007bff;
-            color: white;
-            font-weight: bold;
-        }
-        tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        tr:hover {
-            background-color: #f1f1f1;
-        }
-        .metric-cell {
-            /* Style for cells that will be color-coded */
-        }
-        caption {
-            caption-side: top;
-            font-size: 1.2em;
-            font-weight: bold;
-            padding: 10px;
-            color: #007bff;
-        }
-    </style>
-</head>
+// Styles remain largely the same, but will be embedded directly by Maud
+const CSS_STYLES: &str = r#"
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0;
+    background-color: #f4f4f4;
+    color: #333;
+    padding: 20px;
+}
+h1 {
+    color: #333;
+    text-align: center;
+}
+table {
+    width: 90%;
+    margin: 20px auto;
+    border-collapse: collapse;
+    box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+    background-color: white;
+}
+th, td {
+    border: 1px solid #ddd;
+    padding: 10px 12px;
+    text-align: left;
+}
+th {
+    background-color: #007bff;
+    color: white;
+    font-weight: bold;
+    position: relative; /* For positioning sort arrows */
+}
+tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+tr:hover {
+    background-color: #f1f1f1;
+}
+.metric-cell {
+    /* Style for cells that will be color-coded */
+}
+caption {
+    caption-side: top;
+    font-size: 1.2em;
+    font-weight: bold;
+    padding: 10px;
+    color: #007bff;
+}
+.sortable-header {
+    cursor: pointer;
+}
+.sortable-header::after {
+    content: '\25b2\25bc'; /* Default: up and down triangles */
+    font-size: 0.9em;
+    margin-left: 7px;
+    color: #a0cfff; /* Lighter blue, less prominent */
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+.sortable-header.sort-asc::after {
+    content: '\25b2'; /* Up triangle */
+    color: #ffffff; /* White, prominent */
+}
+.sortable-header.sort-desc::after {
+    content: '\25bc'; /* Down triangle */
+    color: #ffffff; /* White, prominent */
+}
 "#;
 
-pub fn start_html_doc(buffer: &mut String, title: &str) -> Result<()> {
-    writeln!(buffer, "<!DOCTYPE html>")?;
-    writeln!(buffer, "<html lang=\"en\">")?;
-    writeln!(buffer, "{}", HTML_HEAD_CONTENT)?;
-    writeln!(buffer, "<body>")?;
-    writeln!(buffer, "<h1>{}</h1>", title)?;
-    Ok(())
-}
+const TABLE_SORTING_JS: &str = r###"
+document.addEventListener('DOMContentLoaded', function() {
+    const getCellValue = (tr, idx, type) => {
+        const cellContent = tr.children[idx].innerText || tr.children[idx].textContent;
+        if (type === 'number') {
+            // Attempt to parse float, removing common non-numeric characters like %, ,, $
+            const num = parseFloat(cellContent.replace(/[%$,]/g, ''));
+            return isNaN(num) ? -Infinity : num; // Treat non-numeric as very small for sorting
+        }
+        return cellContent.trim().toLowerCase(); // Case-insensitive string sort
+    };
 
-pub fn end_html_doc(buffer: &mut String) -> Result<()> {
-    writeln!(buffer, "</body>")?;
-    writeln!(buffer, "</html>")?;
-    Ok(())
-}
+    // type === 'number' is already implicitly handled by getCellValue returning numbers for 'number' type.
+    // The comparison logic v1 - v2 works for numbers. For strings, localeCompare is used.
+    const comparer = (idx, asc, type) => (a, b) => {
+        const vA = getCellValue(a, idx, type);
+        const vB = getCellValue(b, idx, type);
 
-pub fn start_table(buffer: &mut String, caption: Option<&str>) -> Result<()> {
-    writeln!(buffer, "<table>")?;
-    if let Some(cap) = caption {
-        writeln!(buffer, "<caption>{}</caption>", cap)?;
-    }
-    Ok(())
-}
-
-pub fn end_table(buffer: &mut String) -> Result<()> {
-    writeln!(buffer, "</table>")?;
-    Ok(())
-}
-
-pub fn add_table_header(buffer: &mut String, headers: &[&str]) -> Result<()> {
-    writeln!(buffer, "<thead><tr>")?;
-    for header in headers {
-        writeln!(buffer, "<th>{}</th>", header)?;
-    }
-    writeln!(buffer, "</tr></thead><tbody>")?;
-    Ok(())
-}
-
-pub fn add_table_row(
-    buffer: &mut String,
-    cells: &[String],
-    cell_styles: Option<&[String]>,
-) -> Result<()> {
-    writeln!(buffer, "<tr>")?;
-    for (i, cell_content) in cells.iter().enumerate() {
-        if let Some(styles) = cell_styles {
-            if i < styles.len() && !styles[i].is_empty() {
-                writeln!(buffer, "<td style=\"{}\">{}</td>", styles[i], cell_content)?;
-            } else {
-                writeln!(buffer, "<td>{}</td>", cell_content)?;
-            }
+        let comparison = 0;
+        if (type === 'number') {
+            comparison = vA - vB;
         } else {
-            writeln!(buffer, "<td>{}</td>", cell_content)?;
+            comparison = vA.toString().localeCompare(vB.toString());
+        }
+        return asc ? comparison : -comparison;
+    };
+
+    document.querySelectorAll('.sortable-table .sortable-header').forEach(th => {
+        th.addEventListener('click', (() => {
+            const table = th.closest('table');
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return; // No table body to sort
+
+            const columnIndex = parseInt(th.dataset.columnIndex);
+            const sortType = th.dataset.sortType || 'string';
+
+            let newAsc;
+            // If already sorted by this column, toggle direction
+            if (th.classList.contains('sort-asc')) {
+                th.classList.remove('sort-asc');
+                th.classList.add('sort-desc');
+                newAsc = false;
+            } else if (th.classList.contains('sort-desc')) {
+                th.classList.remove('sort-desc');
+                th.classList.add('sort-asc');
+                newAsc = true;
+            } else { // Not sorted by this column yet, or sorted by another
+                // Remove sort classes from other headers
+                table.querySelectorAll('.sortable-header').forEach(otherTh => {
+                    otherTh.classList.remove('sort-asc', 'sort-desc');
+                });
+                th.classList.add('sort-asc');
+                newAsc = true;
+            }
+
+            Array.from(tbody.querySelectorAll('tr'))
+                .sort(comparer(columnIndex, newAsc, sortType))
+                .forEach(tr => tbody.appendChild(tr)); // Re-append rows to sort them in the DOM
+        }));
+    });
+});
+"###;
+
+/// Renders a full HTML document with the given title and body markup.
+pub fn render_html_doc(title_text: &str, body_content: Markup) -> String {
+    html! {
+        (DOCTYPE)
+        html lang="en" {
+            head {
+                meta charset="UTF-8";
+                meta name="viewport" content="width=device-width, initial-scale=1.0";
+                title { (title_text) }
+                style { (PreEscaped(CSS_STYLES)) }
+            }
+            body {
+                h1 { (title_text) }
+                (body_content)
+                script { (PreEscaped(TABLE_SORTING_JS)) }
+            }
         }
     }
-    writeln!(buffer, "</tr>")?;
-    Ok(())
-}
-
-pub fn end_table_body(buffer: &mut String) -> Result<()> {
-    writeln!(buffer, "</tbody>")?;
-    Ok(())
+    .into_string()
 }
 
 /// Generates an HSL background color style string based on the value's "badness".
@@ -227,19 +263,16 @@ impl MetricRanges {
     }
 }
 
-pub fn write_metric_explanation_list(
-    buffer: &mut String,
-    explanations: &[(&str, &str)],
-) -> Result<()> {
-    writeln!(buffer, "<h2>Metric Explanations</h2>")?;
-    writeln!(buffer, "<ul>")?;
-    for (metric, explanation) in explanations {
-        writeln!(
-            buffer,
-            "<li><strong>{}:</strong> {}</li>",
-            metric, explanation
-        )?;
+/// Renders a list of metric explanations using Maud.
+pub fn render_metric_explanation_list(explanations: &[(&str, &str)]) -> Markup {
+    html! {
+        h2 { "Metric Explanations" }
+        ul {
+            @for (metric, explanation) in explanations {
+                li {
+                    strong { (metric) ": " } (explanation)
+                }
+            }
+        }
     }
-    writeln!(buffer, "</ul>")?;
-    Ok(())
 }

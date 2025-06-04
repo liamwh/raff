@@ -1,12 +1,13 @@
 use anyhow::{bail, Context, Result};
-use std::{collections::HashMap, fmt::Write, fs, path::PathBuf};
+use maud::{html, Markup};
+use std::{collections::HashMap, fs, path::PathBuf};
 use syn::visit::Visit;
 use syn::File as SynFile;
 
 use crate::cli::{StatementCountArgs, StatementCountOutputFormat}; // Import the specific args struct
 use crate::counter::StmtCounter; // Assuming counter.rs is at crate::counter
 use crate::file_utils::{collect_all_rs, relative_namespace, top_level_component}; // Assuming file_utils.rs is at crate::file_utils
-use crate::html_utils;
+use crate::html_utils; // Now using Maud-based html_utils
 use crate::reporting::print_report; // Assuming reporting.rs is at crate::reporting // Import the new HTML utilities
 
 /// Rule to count statements in Rust components and check against a threshold.
@@ -101,19 +102,18 @@ impl StatementCountRule {
                 );
             }
             StatementCountOutputFormat::Html => {
-                let html_output = self.print_statement_count_html_report(
+                let html_output = self.render_statement_count_html_report(
                     &component_stats,
                     grand_total,
                     threshold,
                     analysis_path,
                 )?;
                 println!("{}", html_output);
-                // Check threshold for exit code after printing HTML
                 let any_over_threshold =
                     component_stats.values().any(|&(_file_count, st_count)| {
                         if grand_total == 0 {
                             return false;
-                        } // Avoid division by zero
+                        }
                         let percentage = (st_count * 100) / grand_total;
                         percentage > threshold
                     });
@@ -128,103 +128,78 @@ impl StatementCountRule {
         Ok(())
     }
 
-    fn print_statement_count_html_report(
+    fn render_statement_count_html_report(
         &self,
         component_stats: &HashMap<String, (usize, usize)>,
         grand_total: usize,
         threshold: usize,
         analysis_path: &PathBuf,
     ) -> Result<String> {
-        let mut html_buffer = String::new();
-        html_utils::start_html_doc(
-            &mut html_buffer,
-            &format!("Statement Count Report: {}", analysis_path.display()),
-        )?;
+        let title = format!("Statement Count Report: {}", analysis_path.display());
 
-        let explanations = [
+        let explanations_data = [
             ("Component", "Name of the top-level component (e.g., directory under src/, or crate name)."),
             ("File Count", "Number of .rs files within this component."),
             ("Statement Count", "Total number of Rust statements counted in this component."),
             ("Percentage", "This component's statement count as a percentage of the grand total. Cells are colored red if this exceeds the threshold."),
         ];
-        html_utils::write_metric_explanation_list(&mut html_buffer, &explanations)?;
-
-        html_utils::start_table(
-            &mut html_buffer,
-            Some(&format!(
-                "Analysis Path: {}. Threshold: {}%",
-                analysis_path.display(),
-                threshold
-            )),
-        )?;
-        html_utils::add_table_header(
-            &mut html_buffer,
-            &["Component", "File Count", "Statement Count", "Percentage"],
-        )?;
+        let explanations_markup = html_utils::render_metric_explanation_list(&explanations_data);
 
         let mut sorted_components: Vec<_> = component_stats.iter().collect();
         sorted_components.sort_by_key(|&(name, _)| name.clone());
 
-        for (name, (file_count, st_count)) in sorted_components {
-            let percentage = if grand_total > 0 {
-                (st_count * 100) / grand_total
-            } else {
-                0
-            };
-
-            let cells = vec![
-                name.to_string(),
-                file_count.to_string(),
-                st_count.to_string(),
-                format!("{}%", percentage),
-            ];
-
-            let cell_styles = vec![
-                String::new(), // Component name
-                String::new(), // File count
-                String::new(), // Statement count
-                html_utils::get_cell_style(
-                    percentage as f64,
-                    threshold as f64,
-                    threshold as f64,
-                    false,
-                ),
-            ];
-            html_utils::add_table_row(&mut html_buffer, &cells, Some(&cell_styles))?;
-        }
-
-        html_utils::end_table_body(&mut html_buffer)?;
-        html_utils::end_table(&mut html_buffer)?;
-
-        // Summary
-        writeln!(
-            &mut html_buffer,
-            "<p><b>Grand Total Statements: {}</b></p>",
-            grand_total
-        )?;
-        let any_over_threshold = component_stats.values().any(|&(_file_count, st_count)| {
-            if grand_total == 0 {
-                return false;
+        let table_markup = html! {
+            table class="sortable-table" {
+                caption { (format!("Analysis Path: {}. Threshold: {}%", analysis_path.display(), threshold)) }
+                thead {
+                    tr {
+                        th class="sortable-header" data-column-index="0" data-sort-type="string" { "Component" }
+                        th class="sortable-header" data-column-index="1" data-sort-type="number" { "File Count" }
+                        th class="sortable-header" data-column-index="2" data-sort-type="number" { "Statement Count" }
+                        th class="sortable-header" data-column-index="3" data-sort-type="number" { "Percentage" }
+                    }
+                }
+                tbody {
+                    @for (name, (file_count, st_count)) in sorted_components {
+                        @let percentage = if grand_total > 0 { (*st_count * 100) / grand_total } else { 0 };
+                        @let percentage_style = html_utils::get_cell_style(percentage as f64, threshold as f64, threshold as f64, false);
+                        tr {
+                            td { (name) }
+                            td { (file_count) }
+                            td { (st_count) }
+                            td style=(percentage_style) { (format!("{}%", percentage)) }
+                        }
+                    }
+                }
             }
-            let percentage = (st_count * 100) / grand_total;
-            percentage > threshold
-        });
+        };
 
-        if any_over_threshold {
-            writeln!(
-                &mut html_buffer,
-                "<p style=\"color: red;\"><b>Warning: At least one component exceeds the {}% threshold.</b></p>",
-                threshold
-            )?;
-        } else {
-            writeln!(
-                &mut html_buffer,
-                "<p style=\"color: green;\">All components are within the {}% threshold.</p>",
-                threshold
-            )?;
-        }
+        let summary_markup = html! {
+            p {
+                b { "Grand Total Statements: " (grand_total) }
+            }
+            @let any_over_threshold = component_stats.values().any(|&(_file_count, st_count)| {
+                if grand_total == 0 { return false; }
+                let percentage = (st_count * 100) / grand_total;
+                percentage > threshold
+            });
+            @if any_over_threshold {
+                p style="color: red;" {
+                    b { "Warning: At least one component exceeds the " (threshold) "% threshold." }
+                }
+            } @else {
+                p style="color: green;" {
+                    "All components are within the " (threshold) "% threshold."
+                }
+            }
+        };
 
-        html_utils::end_html_doc(&mut html_buffer)?;
-        Ok(html_buffer)
+        let body_content = html! {
+            (explanations_markup)
+            (table_markup)
+            (summary_markup)
+        };
+
+        Ok(html_utils::render_html_doc(&title, body_content))
     }
 }

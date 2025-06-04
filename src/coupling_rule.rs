@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
+use maud::{html, Markup};
 use prettytable::{Cell, Row, Table};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -149,7 +149,7 @@ impl CouplingRule {
             }
             CouplingOutputFormat::Html => {
                 let html_output =
-                    self.print_coupling_html_report(&full_report, &args.granularity, &args.path)?;
+                    self.render_coupling_html_report(&full_report, &args.granularity, &args.path)?;
                 println!("{}", html_output);
             }
         }
@@ -432,75 +432,60 @@ impl CouplingRule {
         Ok(())
     }
 
-    fn print_coupling_html_report(
+    fn render_coupling_html_report(
         &self,
         report: &CouplingReport,
         granularity: &CouplingGranularity,
         analysis_path: &PathBuf,
     ) -> Result<String> {
-        let mut html_buffer = String::new();
-        html_utils::start_html_doc(
-            &mut html_buffer,
-            &format!("Coupling Report: {}", analysis_path.display()),
-        )?;
+        let title = format!("Coupling Report: {}", analysis_path.display());
 
-        let explanations = [
+        let explanations_data = [
             ("Ce (Efferent Coupling)", "Number of other components that this component depends on. Higher is generally worse."),
             ("Ca (Afferent Coupling)", "Number of other components that depend on this component. Higher indicates more responsibility, can be good or bad depending on context but often indicates potential impact of changes."),
         ];
-        html_utils::write_metric_explanation_list(&mut html_buffer, &explanations)?;
+        let explanations_markup = html_utils::render_metric_explanation_list(&explanations_data);
 
+        let mut crate_table_markup = html! {};
         if matches!(
             granularity,
             CouplingGranularity::Crate | CouplingGranularity::Both
         ) {
-            html_utils::start_table(&mut html_buffer, Some("Crate Level Coupling"))?;
-            html_utils::add_table_header(
-                &mut html_buffer,
-                &["Crate Name", "Ce (Efferent)", "Ca (Afferent)"],
-            )?;
-
             let ce_values: Vec<f64> = report.crates.iter().map(|c| c.ce as f64).collect();
             let ca_values: Vec<f64> = report.crates.iter().map(|c| c.ca as f64).collect();
             let ce_ranges = html_utils::MetricRanges::from_values(&ce_values, false);
             let ca_ranges = html_utils::MetricRanges::from_values(&ca_values, false);
 
-            for crate_data in &report.crates {
-                let cells = vec![
-                    crate_data.name.clone(),
-                    crate_data.ce.to_string(),
-                    crate_data.ca.to_string(),
-                ];
-                let cell_styles = vec![
-                    String::new(),
-                    ce_ranges.as_ref().map_or_else(String::new, |r| {
-                        html_utils::get_metric_cell_style(crate_data.ce as f64, r)
-                    }),
-                    ca_ranges.as_ref().map_or_else(String::new, |r| {
-                        html_utils::get_metric_cell_style(crate_data.ca as f64, r)
-                    }),
-                ];
-                html_utils::add_table_row(&mut html_buffer, &cells, Some(&cell_styles))?;
-            }
-            html_utils::end_table_body(&mut html_buffer)?;
-            html_utils::end_table(&mut html_buffer)?;
+            crate_table_markup = html! {
+                table class="sortable-table" {
+                    caption { "Crate Level Coupling" }
+                    thead {
+                        tr {
+                            th class="sortable-header" data-column-index="0" data-sort-type="string" { "Crate Name" }
+                            th class="sortable-header" data-column-index="1" data-sort-type="number" { "Ce (Efferent)" }
+                            th class="sortable-header" data-column-index="2" data-sort-type="number" { "Ca (Afferent)" }
+                        }
+                    }
+                    tbody {
+                        @for crate_data in &report.crates {
+                            tr {
+                                td { (crate_data.name) }
+                                td style=({ce_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(crate_data.ce as f64, r))}) { (crate_data.ce) }
+                                td style=({ca_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(crate_data.ca as f64, r))}) { (crate_data.ca) }
+                            }
+                        }
+                    }
+                }
+            };
         }
 
+        let mut module_tables_markup: Vec<Markup> = Vec::new();
         if matches!(
             granularity,
             CouplingGranularity::Module | CouplingGranularity::Both
         ) {
             for crate_data in &report.crates {
                 if !crate_data.modules.is_empty() {
-                    html_utils::start_table(
-                        &mut html_buffer,
-                        Some(&format!("Module Level Coupling: {}", crate_data.name)),
-                    )?;
-                    html_utils::add_table_header(
-                        &mut html_buffer,
-                        &["Module Path", "Ce_m (Efferent)", "Ca_m (Afferent)"],
-                    )?;
-
                     let ce_m_values: Vec<f64> =
                         crate_data.modules.iter().map(|m| m.ce_m as f64).collect();
                     let ca_m_values: Vec<f64> =
@@ -508,30 +493,40 @@ impl CouplingRule {
                     let ce_m_ranges = html_utils::MetricRanges::from_values(&ce_m_values, false);
                     let ca_m_ranges = html_utils::MetricRanges::from_values(&ca_m_values, false);
 
-                    for module_data in &crate_data.modules {
-                        let cells = vec![
-                            format!("  {}", module_data.path),
-                            module_data.ce_m.to_string(),
-                            module_data.ca_m.to_string(),
-                        ];
-                        let cell_styles = vec![
-                            String::new(),
-                            ce_m_ranges.as_ref().map_or_else(String::new, |r| {
-                                html_utils::get_metric_cell_style(module_data.ce_m as f64, r)
-                            }),
-                            ca_m_ranges.as_ref().map_or_else(String::new, |r| {
-                                html_utils::get_metric_cell_style(module_data.ca_m as f64, r)
-                            }),
-                        ];
-                        html_utils::add_table_row(&mut html_buffer, &cells, Some(&cell_styles))?;
-                    }
-                    html_utils::end_table_body(&mut html_buffer)?;
-                    html_utils::end_table(&mut html_buffer)?;
+                    module_tables_markup.push(html! {
+                        table class="sortable-table" {
+                            caption { (format!("Module Level Coupling: {}", crate_data.name)) }
+                            thead {
+                                tr {
+                                    th class="sortable-header" data-column-index="0" data-sort-type="string" { "Module Path" }
+                                    th class="sortable-header" data-column-index="1" data-sort-type="number" { "Ce_m (Efferent)" }
+                                    th class="sortable-header" data-column-index="2" data-sort-type="number" { "Ca_m (Afferent)" }
+                                }
+                            }
+                            tbody {
+                                @for module_data in &crate_data.modules {
+                                    tr {
+                                        td { (format!("  {}", module_data.path)) }
+                                        td style=({ce_m_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(module_data.ce_m as f64, r))}) { (module_data.ce_m) }
+                                        td style=({ca_m_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(module_data.ca_m as f64, r))}) { (module_data.ca_m) }
+                                    }
+                                }
+                            }
+                        }
+                    });
                 }
             }
         }
-        html_utils::end_html_doc(&mut html_buffer)?;
-        Ok(html_buffer)
+
+        let body_content = html! {
+            (explanations_markup)
+            (crate_table_markup)
+            @for table_markup in module_tables_markup {
+                (table_markup)
+            }
+        };
+
+        Ok(html_utils::render_html_doc(&title, body_content))
     }
 
     #[tracing::instrument(level = "debug", skip(self, current_dir, base_mod_path, module_map))]
@@ -654,16 +649,13 @@ impl<'a> Visit<'a> for ModuleDependencyVisitor<'a> {
         if item_mod.content.is_some() {
             let mod_name = item_mod.ident.to_string();
             let original_path = self.current_module_path.clone();
-            if self
-                .current_module_path
-                .last()
-                .is_some_and(|last| last == "crate")
-                && self.current_module_path.len() == 1
-            {
-                self.current_module_path.push(mod_name);
+
+            if self.current_module_path.len() == 1 && self.current_module_path[0] == "crate" {
+                self.current_module_path = vec!["crate".to_string(), mod_name];
             } else {
                 self.current_module_path.push(mod_name);
             }
+
             syn::visit::visit_item_mod(self, item_mod);
             self.current_module_path = original_path;
         } else {
@@ -715,7 +707,12 @@ impl<'a> ModuleDependencyVisitor<'a> {
                 ) {
                     self.dependencies.insert(resolved_path);
                 }
-                self.add_dependency_from_path_tree(&use_path.tree);
+                match use_path.tree.as_ref() {
+                    syn::UseTree::Path(_) | syn::UseTree::Group(_) => {
+                        self.add_dependency_from_path_tree(&use_path.tree);
+                    }
+                    _ => {}
+                }
             }
             syn::UseTree::Name(_use_name) => {}
             syn::UseTree::Rename(_use_rename) => {}
@@ -822,8 +819,9 @@ impl<'a> ModuleDependencyVisitor<'a> {
         if path_parts.is_empty() {
             return false;
         }
-        self.module_map
-            .keys()
-            .any(|known_mod_path| known_mod_path.starts_with(&query_prefix))
+        self.module_map.keys().any(|known_mod_path| {
+            known_mod_path == &query_prefix
+                || known_mod_path.starts_with(&(query_prefix.clone() + "::"))
+        })
     }
 }
