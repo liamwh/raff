@@ -77,6 +77,5 @@ The following enhancements are planned or could be valuable additions:
 * [ ] 🔶 FF: Do any domain objects use primitive types? (e.g. `String` instead of `Name`).
 * [ ] 🏛️ FF: Is codebase flat? (Analyze and visualize component hierarchy).
 * [ ] 🚫 FF: No source code should reside in the root namespace (or other configurable namespace rules).
-* [ ] 🕸️ Map imports and output a dependency graph (e.g., using DOT format or an interactive visualization).
 * [ ] ⚖️ Configurable thresholds for fitness functions to produce pass/fail results.
 * [ ] 🚀 Integration with CI/CD pipelines / github actions.
