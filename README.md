@@ -49,19 +49,19 @@ raff <COMMAND> [OPTIONS]
 ### Available Commands
 
 * **`StatementCount`**: Analyzes statement counts.
-  * Example: `raff StatementCount --path ./src --output-format table`
+  * Example: `raff statement-count --path ./src --output-format table`
   * *(You might need to add specific options based on how `StatementCountArgs` is defined. Common options could include `--path <directory/file>`, `--exclude <patterns>`, etc.)*
 
 * **`Volatility`**: Analyzes code churn from Git history.
-  * Example: `raff Volatility --path . --output-format json`
+  * Example: `raff volatility --path . --output-format json`
   * *(Typically requires the target to be a Git repository. Options might include date ranges, file patterns.)*
 
 * **`Coupling`**: Analyzes dependencies between modules.
-  * Example: `raff Coupling --path ./src`
+  * Example: `raff coupling --path ./src`
   * *(Might require specifying module boundaries or analysis depth.)*
 
 * **`RustCodeAnalysis`**: Performs general Rust code analysis.
-  * Example: `raff RustCodeAnalysis --path ./src --rule <specific_rule_name>`
+  * Example: `raff rust-code-analysis --path ./src --rule <specific_rule_name>`
   * *(The exact options will depend on the implemented analysis rules.)*
 
 For detailed options for each command, run:
