@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2025-06-18
+
+### CI
+
+- Rename workflow for releasing to crates.io ([`4ee81bd`](4ee81bd3bb3c6c6b2df79268af563a4dd2ccdfbc))
+- Add manual trigger for cargo-dist workflow ([`478f37d`](478f37d35cb28f0cbc86b8825da574100966388c))
+
+
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [0.1.2] - 2025-06-18
 
 ### CI
