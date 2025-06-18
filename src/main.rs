@@ -1,5 +1,6 @@
 //! rust-ff: A collection of Rust code analysis tools and fitness functions.
 
+mod all_rules;
 mod cli;
 mod counter;
 mod coupling_rule;
@@ -57,6 +58,10 @@ fn main() -> Result<()> {
             let rule = RustCodeAnalysisRule::new();
             tracing::info!("Running RustCodeAnalysis rule with args: {:?}", args);
             rule.run(&args)
+        }
+        Commands::All(args) => {
+            tracing::info!("Running all rules with args: {:?}", args);
+            all_rules::run_all(&args)
         }
     };
 

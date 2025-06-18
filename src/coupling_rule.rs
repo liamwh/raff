@@ -57,24 +57,26 @@ struct CrateLevelAnalysisResult {
 
 #[derive(Serialize, Debug, Clone)]
 pub struct CrateCoupling {
-    name: String,
-    ce: usize,
-    ca: usize,
-    modules: Vec<ModuleCoupling>,
-    dependencies: HashSet<String>,
+    pub name: String,
+    pub ce: usize,
+    pub ca: usize,
+    pub modules: Vec<ModuleCoupling>,
+    pub dependencies: HashSet<String>,
 }
 
 #[derive(Serialize, Debug, Default, Clone)]
 pub struct ModuleCoupling {
-    path: String,
-    ce_m: usize,
-    ca_m: usize,
-    module_dependencies: HashSet<String>,
+    pub path: String,
+    pub ce_m: usize,
+    pub ca_m: usize,
+    pub module_dependencies: HashSet<String>,
 }
 
 #[derive(Serialize, Debug, Default)]
-pub struct CouplingReport {
-    crates: Vec<CrateCoupling>,
+pub struct CouplingData {
+    pub crates: Vec<CrateCoupling>,
+    pub granularity: CouplingGranularity,
+    pub analysis_path: PathBuf,
 }
 
 pub struct CouplingRule;
@@ -86,13 +88,48 @@ impl CouplingRule {
 
     #[tracing::instrument(level = "debug", skip(self, args), ret)]
     pub fn run(&self, args: &CouplingArgs) -> Result<()> {
+        let full_report = self.analyze(args)?;
+
+        match args.output {
+            CouplingOutputFormat::Table => {
+                self.print_table_report(&full_report, &full_report.granularity)?;
+            }
+            CouplingOutputFormat::Json => {
+                let json = serde_json::to_string_pretty(&full_report)?;
+                println!("{}", json);
+            }
+            CouplingOutputFormat::Yaml => {
+                let yaml = serde_yaml::to_string(&full_report)?;
+                println!("{}", yaml);
+            }
+            CouplingOutputFormat::Html => {
+                let html_body = self.render_coupling_html_body(&full_report)?;
+                let full_html = html_utils::render_html_doc(
+                    &format!("Coupling Report: {}", &full_report.analysis_path.display()),
+                    html_body,
+                );
+                println!("{}", full_html);
+            }
+            CouplingOutputFormat::Dot => {
+                self.print_dot_report(&full_report, &full_report.granularity)?;
+            }
+        }
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "debug", skip(self, args), ret)]
+    pub fn analyze(&self, args: &CouplingArgs) -> Result<CouplingData> {
         let analysis_result = self.analyze_crate_level_coupling(args)?;
         let crate_couplings_map = analysis_result.crate_couplings_map;
         let workspace_packages_map = analysis_result.workspace_packages_map;
         let package_id_to_name = analysis_result.package_id_to_name;
         let workspace_member_ids = analysis_result.workspace_member_ids;
 
-        let mut full_report = CouplingReport { crates: Vec::new() };
+        let mut full_report = CouplingData {
+            crates: Vec::new(),
+            granularity: args.granularity.clone(),
+            analysis_path: args.path.clone(),
+        };
 
         let mut sorted_workspace_pkg_ids: Vec<_> = workspace_member_ids.iter().cloned().collect();
         sorted_workspace_pkg_ids
@@ -138,28 +175,7 @@ impl CouplingRule {
             .crates
             .sort_by(|a, b| (b.ce + b.ca).cmp(&(a.ce + a.ca)));
 
-        match args.output {
-            CouplingOutputFormat::Table => {
-                self.print_table_report(&full_report, &args.granularity)?;
-            }
-            CouplingOutputFormat::Json => {
-                let json = serde_json::to_string_pretty(&full_report)?;
-                println!("{}", json);
-            }
-            CouplingOutputFormat::Yaml => {
-                let yaml = serde_yaml::to_string(&full_report)?;
-                println!("{}", yaml);
-            }
-            CouplingOutputFormat::Html => {
-                let html_output =
-                    self.render_coupling_html_report(&full_report, &args.granularity, &args.path)?;
-                println!("{}", html_output);
-            }
-            CouplingOutputFormat::Dot => {
-                self.print_dot_report(&full_report, &args.granularity)?;
-            }
-        }
-        Ok(())
+        Ok(full_report)
     }
 
     #[tracing::instrument(level = "debug", skip(self, args), ret)]
@@ -386,7 +402,7 @@ impl CouplingRule {
 
     fn print_table_report(
         &self,
-        report: &CouplingReport,
+        report: &CouplingData,
         granularity: &CouplingGranularity,
     ) -> Result<()> {
         if matches!(
@@ -453,108 +469,107 @@ impl CouplingRule {
         Ok(())
     }
 
-    fn render_coupling_html_report(
-        &self,
-        report: &CouplingReport,
-        granularity: &CouplingGranularity,
-        analysis_path: &PathBuf,
-    ) -> Result<String> {
-        let title = format!("Coupling Report: {}", analysis_path.display());
-
-        let explanations_data = [
-            ("Ce (Efferent Coupling)", "Number of other components that this component depends on. Higher is generally worse."),
-            ("Ca (Afferent Coupling)", "Number of other components that depend on this component. Higher indicates more responsibility, can be good or bad depending on context but often indicates potential impact of changes."),
+    pub fn render_coupling_html_body(&self, report: &CouplingData) -> Result<Markup> {
+        let granularity = &report.granularity;
+        let analysis_path = &report.analysis_path;
+        let mut explanations = vec![
+            ("Ce (Efferent Coupling)", "The number of other components that this component depends on."),
+            ("Ca (Afferent Coupling)", "The number of other components that depend on this component."),
+            ("I (Instability)", "Ce / (Ce + Ca). Ranges from 0 (completely stable) to 1 (completely unstable)."),
+            ("A (Abstractness)", "Not implemented in this version."),
+            ("D (Distance)", "The perpendicular distance from the main sequence. |A + I - 1|. A value of 0 is ideal, 1 is the furthest away."),
         ];
-        let explanations_markup = html_utils::render_metric_explanation_list(&explanations_data);
-
-        let mut crate_table_markup = html! {};
-        if matches!(
-            granularity,
-            CouplingGranularity::Crate | CouplingGranularity::Both
-        ) {
-            let ce_values: Vec<f64> = report.crates.iter().map(|c| c.ce as f64).collect();
-            let ca_values: Vec<f64> = report.crates.iter().map(|c| c.ca as f64).collect();
-            let ce_ranges = html_utils::MetricRanges::from_values(&ce_values, false);
-            let ca_ranges = html_utils::MetricRanges::from_values(&ca_values, false);
-
-            crate_table_markup = html! {
-                table class="sortable-table" {
-                    caption { "Crate Level Coupling" }
-                    thead {
-                        tr {
-                            th class="sortable-header" data-column-index="0" data-sort-type="string" { "Crate Name" }
-                            th class="sortable-header" data-column-index="1" data-sort-type="number" { "Ce (Efferent)" }
-                            th class="sortable-header" data-column-index="2" data-sort-type="number" { "Ca (Afferent)" }
-                        }
-                    }
-                    tbody {
-                        @for crate_data in &report.crates {
-                            tr {
-                                td { (crate_data.name) }
-                                td style=({ce_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(crate_data.ce as f64, r))}) { (crate_data.ce) }
-                                td style=({ca_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(crate_data.ca as f64, r))}) { (crate_data.ca) }
-                            }
-                        }
-                    }
-                }
-            };
-        }
-
-        let mut module_tables_markup: Vec<Markup> = Vec::new();
         if matches!(
             granularity,
             CouplingGranularity::Module | CouplingGranularity::Both
         ) {
-            for crate_data in &report.crates {
-                if !crate_data.modules.is_empty() {
-                    let ce_m_values: Vec<f64> =
-                        crate_data.modules.iter().map(|m| m.ce_m as f64).collect();
-                    let ca_m_values: Vec<f64> =
-                        crate_data.modules.iter().map(|m| m.ca_m as f64).collect();
-                    let ce_m_ranges = html_utils::MetricRanges::from_values(&ce_m_values, false);
-                    let ca_m_ranges = html_utils::MetricRanges::from_values(&ca_m_values, false);
+            explanations.push(("Ce_M (Module Efferent Coupling)", "Number of other modules this module depends on (within the same crate or other workspace crates)."));
+            explanations.push((
+                "Ca_M (Module Afferent Coupling)",
+                "Number of other modules that depend on this module.",
+            ));
+        }
 
-                    module_tables_markup.push(html! {
+        let explanations_markup = html_utils::render_metric_explanation_list(&explanations);
+
+        let max_coupling = report.crates.iter().map(|c| c.ce + c.ca).max().unwrap_or(1) as f64;
+
+        let table_markup = html! {
+            @if matches!(granularity, CouplingGranularity::Crate | CouplingGranularity::Both) {
+                h2 { "Crate Level Coupling" }
+                table class="sortable-table" {
+                    caption { (format!("Analysis Path: {}", analysis_path.display())) }
+                    thead {
+                        tr {
+                            th class="sortable-header" data-column-index="0" data-sort-type="string" { "Crate" }
+                            th class="sortable-header" data-column-index="1" data-sort-type="number" { "Ce" }
+                            th class="sortable-header" data-column-index="2" data-sort-type="number" { "Ca" }
+                            th class="sortable-header" data-column-index="3" data-sort-type="number" { "I" }
+                            th class="sortable-header" data-column-index="4" data-sort-type="string" { "A" }
+                            th class="sortable-header" data-column-index="5" data-sort-type="number" { "D" }
+                        }
+                    }
+                    tbody {
+                        @for krate in &report.crates {
+                            @let instability = if (krate.ce + krate.ca) > 0 { krate.ce as f64 / (krate.ce + krate.ca) as f64 } else { 0.0 };
+                            @let distance = (instability - 1.0).abs();
+                            @let ce_style = html_utils::get_cell_style(krate.ce as f64, max_coupling / 2.0, max_coupling, false);
+                            @let ca_style = html_utils::get_cell_style(krate.ca as f64, max_coupling / 2.0, max_coupling, false);
+                             @let i_style = html_utils::get_cell_style(instability, 0.5, 0.8, false);
+                            @let d_style = html_utils::get_cell_style(distance, 0.5, 0.8, false);
+
+                            tr {
+                                td { (krate.name) }
+                                td style=(ce_style) { (krate.ce) }
+                                td style=(ca_style) { (krate.ca) }
+                                td style=(i_style) { (format!("{:.2}", instability)) }
+                                td { "N/A" }
+                                td style=(d_style) { (format!("{:.2}", distance)) }
+                            }
+                        }
+                    }
+                }
+            }
+
+            @if matches!(granularity, CouplingGranularity::Module | CouplingGranularity::Both) {
+                h2 { "Module Level Coupling" }
+                @for krate in &report.crates {
+                    @if !krate.modules.is_empty() {
+                        h3 { "Crate: " (krate.name) }
                         table class="sortable-table" {
-                            caption { (format!("Module Level Coupling: {}", crate_data.name)) }
                             thead {
                                 tr {
-                                    th class="sortable-header" data-column-index="0" data-sort-type="string" { "Module Path" }
-                                    th class="sortable-header" data-column-index="1" data-sort-type="number" { "Ce_m (Efferent)" }
-                                    th class="sortable-header" data-column-index="2" data-sort-type="number" { "Ca_m (Afferent)" }
+                                    th class="sortable-header" data-column-index="0" data-sort-type="string" { "Module" }
+                                    th class="sortable-header" data-column-index="1" data-sort-type="number" { "Ce_M" }
+                                    th class="sortable-header" data-column-index="2" data-sort-type="number" { "Ca_M" }
                                 }
                             }
                             tbody {
-                                @for module_data in &crate_data.modules {
+                                @for module in &krate.modules {
                                     tr {
-                                        td { (format!("  {}", module_data.path)) }
-                                        td style=({ce_m_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(module_data.ce_m as f64, r))}) { (module_data.ce_m) }
-                                        td style=({ca_m_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(module_data.ca_m as f64, r))}) { (module_data.ca_m) }
+                                        td { (module.path) }
+                                        td { (module.ce_m) }
+                                        td { (module.ca_m) }
                                     }
                                 }
                             }
                         }
-                    });
+                    }
                 }
-            }
-        }
-
-        let body_content = html! {
-            (explanations_markup)
-            (crate_table_markup)
-            @for table_markup in module_tables_markup {
-                (table_markup)
             }
         };
 
-        Ok(html_utils::render_html_doc(&title, body_content))
+        Ok(html! {
+            (explanations_markup)
+            (table_markup)
+        })
     }
 
     // New method for DOT output
     #[tracing::instrument(level = "debug", skip(self, report, granularity))]
     fn print_dot_report(
         &self,
-        report: &CouplingReport,
+        report: &CouplingData,
         granularity: &CouplingGranularity,
     ) -> Result<()> {
         if matches!(
@@ -593,7 +608,7 @@ impl CouplingRule {
     }
 
     #[tracing::instrument(level = "debug", skip(self, report))]
-    fn generate_crate_dot(&self, report: &CouplingReport) -> Result<String> {
+    fn generate_crate_dot(&self, report: &CouplingData) -> Result<String> {
         let mut dot = String::from("digraph CrateCoupling {\n");
         dot.push_str("  rankdir=\"LR\";\n");
         dot.push_str("  node [shape=box, style=filled];\n\n");
@@ -621,7 +636,7 @@ impl CouplingRule {
     }
 
     #[tracing::instrument(level = "debug", skip(self, report))]
-    fn generate_module_dot(&self, report: &CouplingReport) -> Result<String> {
+    fn generate_module_dot(&self, report: &CouplingData) -> Result<String> {
         let mut dot = String::from("digraph ModuleCoupling {\n");
         dot.push_str("  rankdir=\"LR\";\n");
         dot.push_str("  node [shape=box, style=filled];\n");

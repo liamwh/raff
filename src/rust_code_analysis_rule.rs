@@ -12,62 +12,62 @@ use crate::html_utils;
 // --- Structs for deserializing rust-code-analysis-cli JSON output ---
 
 #[derive(Deserialize, Serialize, Debug)]
-struct LocMetrics {
-    sloc: f64,
-    ploc: f64,
-    lloc: f64,
-    cloc: f64,
-    blank: f64,
+pub struct LocMetrics {
+    pub sloc: f64,
+    pub ploc: f64,
+    pub lloc: f64,
+    pub cloc: f64,
+    pub blank: f64,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-struct CyclomaticMetrics {
-    sum: f64,
-    average: f64,
+pub struct CyclomaticMetrics {
+    pub sum: f64,
+    pub average: f64,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-struct HalsteadMetrics {
-    n1: f64,
-    n2: f64,
-    length: f64, // Was N before, ensure it's `length` for parsing if output changed
-    vocabulary: f64,
-    volume: f64,
-    difficulty: f64,
-    effort: f64,
-    time: f64,
-    bugs: f64,
+pub struct HalsteadMetrics {
+    pub n1: f64,
+    pub n2: f64,
+    pub length: f64, // Was N before, ensure it's `length` for parsing if output changed
+    pub vocabulary: f64,
+    pub volume: f64,
+    pub difficulty: f64,
+    pub effort: f64,
+    pub time: f64,
+    pub bugs: f64,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-struct ItemMetrics {
+pub struct ItemMetrics {
     // For simplicity, focusing on loc and cyclomatic for now. Add others as needed.
-    loc: Option<LocMetrics>,
-    cyclomatic: Option<CyclomaticMetrics>,
-    halstead: Option<HalsteadMetrics>,
+    pub loc: Option<LocMetrics>,
+    pub cyclomatic: Option<CyclomaticMetrics>,
+    pub halstead: Option<HalsteadMetrics>,
     // Other metrics like 'nom', 'mi', 'abc', 'cognitive' can be added here
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-struct CodeSpace {
-    name: String,
-    kind: String,
-    start_line: usize,
-    end_line: usize,
-    metrics: ItemMetrics,
-    spaces: Vec<CodeSpace>, // For nested items
+pub struct CodeSpace {
+    pub name: String,
+    pub kind: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub metrics: ItemMetrics,
+    pub spaces: Vec<CodeSpace>, // For nested items
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-struct AnalysisUnit {
-    name: String, // Full path to the file
-    kind: String, // "unit" for files
-    spaces: Vec<CodeSpace>,
-    metrics: Option<ItemMetrics>, // Top-level metrics for the file/unit itself
+pub struct AnalysisUnit {
+    pub name: String, // Full path to the file
+    pub kind: String, // "unit" for files
+    pub spaces: Vec<CodeSpace>,
+    pub metrics: Option<ItemMetrics>, // Top-level metrics for the file/unit itself
 }
 
 // --- Aggregated Metrics Structure ---
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Serialize)]
 struct FileAggregatedMetrics {
     sloc: f64,
     ploc: f64,
@@ -141,6 +141,12 @@ fn aggregate_metrics_recursive(spaces: &[CodeSpace], acc: &mut FileAggregatedMet
 #[derive(Debug)]
 pub struct RustCodeAnalysisRule;
 
+#[derive(Serialize, Debug)]
+pub struct RustCodeAnalysisData {
+    pub analysis_results: Vec<AnalysisUnit>,
+    pub analysis_path: PathBuf,
+}
+
 impl RustCodeAnalysisRule {
     pub fn new() -> Self {
         Self
@@ -148,6 +154,45 @@ impl RustCodeAnalysisRule {
 
     #[instrument(skip(self, args), fields(output = ?args.output))]
     pub fn run(&self, args: &RustCodeAnalysisArgs) -> Result<()> {
+        let data = self.analyze(args)?;
+
+        if data.analysis_results.is_empty() {
+            tracing::info!("Analysis produced no results.");
+            println!("No analysis data produced.");
+            return Ok(());
+        }
+
+        match args.output {
+            RustCodeAnalysisOutputFormat::Table => {
+                print_analysis_table(&data.analysis_results, &data.analysis_path)?;
+            }
+            RustCodeAnalysisOutputFormat::Json => {
+                let json_output = serde_json::to_string_pretty(&data.analysis_results)?;
+                println!("{}", json_output);
+            }
+            RustCodeAnalysisOutputFormat::Yaml => {
+                let yaml_output = serde_yaml::to_string(&data.analysis_results)?;
+                println!("{}", yaml_output);
+            }
+            RustCodeAnalysisOutputFormat::Html => {
+                let body = self.render_rust_code_analysis_html_body(
+                    &data.analysis_results,
+                    &data.analysis_path,
+                )?;
+                let title = format!(
+                    "Rust Code Analysis Report: {}",
+                    data.analysis_path.display()
+                );
+                let full_html = html_utils::render_html_doc(&title, body);
+                println!("{}", full_html);
+            }
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip(self, args))]
+    pub fn analyze(&self, args: &RustCodeAnalysisArgs) -> Result<RustCodeAnalysisData> {
         let analysis_path = PathBuf::from(&args.path);
 
         tracing::info!(
@@ -169,7 +214,10 @@ impl RustCodeAnalysisRule {
                 "No files matching language '{:?}' found in path '{:?}'.",
                 args.language, args.path
             );
-            return Ok(());
+            return Ok(RustCodeAnalysisData {
+                analysis_results: vec![],
+                analysis_path,
+            });
         }
 
         tracing::debug!("Discovered files for CLI: {:?}", file_path_args);
@@ -227,8 +275,10 @@ impl RustCodeAnalysisRule {
 
         if stdout_str.trim().is_empty() {
             tracing::info!("rust-code-analysis-cli produced no output.");
-            println!("No analysis data produced.");
-            return Ok(());
+            return Ok(RustCodeAnalysisData {
+                analysis_results: vec![],
+                analysis_path,
+            });
         }
 
         let mut analysis_results: Vec<AnalysisUnit> = Vec::new();
@@ -248,41 +298,17 @@ impl RustCodeAnalysisRule {
             }
         }
 
-        if analysis_results.is_empty() {
-            tracing::info!("Successfully parsed rust-code-analysis-cli output, but it contained no valid analysis units.");
-            println!("No parsable analysis data found.");
-            return Ok(());
-        }
-
-        match args.output {
-            RustCodeAnalysisOutputFormat::Table => {
-                print_analysis_table(&analysis_results, &analysis_path)?;
-            }
-            RustCodeAnalysisOutputFormat::Json => {
-                let pretty_json = serde_json::to_string_pretty(&analysis_results)
-                    .context("Failed to serialize analysis results to JSON")?;
-                println!("{}", pretty_json);
-            }
-            RustCodeAnalysisOutputFormat::Yaml => {
-                let yaml_output = serde_yaml::to_string(&analysis_results)
-                    .context("Failed to serialize analysis results to YAML")?;
-                println!("{}", yaml_output);
-            }
-            RustCodeAnalysisOutputFormat::Html => {
-                let html_output =
-                    self.render_rust_code_analysis_html_report(&analysis_results, &analysis_path)?;
-                println!("{}", html_output);
-            }
-        }
-
-        Ok(())
+        Ok(RustCodeAnalysisData {
+            analysis_results,
+            analysis_path,
+        })
     }
 
-    fn render_rust_code_analysis_html_report(
+    pub fn render_rust_code_analysis_html_body(
         &self,
         analysis_results: &[AnalysisUnit],
         project_root: &Path,
-    ) -> Result<String> {
+    ) -> Result<maud::Markup> {
         let title = format!("Rust Code Analysis Report: {}", project_root.display());
 
         let explanations_data = [
@@ -483,7 +509,7 @@ impl RustCodeAnalysisRule {
             (table_markup)
         };
 
-        Ok(html_utils::render_html_doc(&title, body_content))
+        Ok(body_content)
     }
 }
 

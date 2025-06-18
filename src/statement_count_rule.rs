@@ -1,5 +1,7 @@
 use anyhow::{bail, Context, Result};
 use maud::html;
+use maud::Markup;
+use serde::Serialize;
 use std::{
     collections::HashMap,
     fs,
@@ -18,12 +20,70 @@ use crate::reporting::print_report; // Assuming reporting.rs is at crate::report
 #[derive(Debug, Default)]
 pub struct StatementCountRule;
 
+#[derive(Debug, Serialize)]
+pub struct StatementCountData {
+    pub component_stats: HashMap<String, (usize, usize)>,
+    pub grand_total: usize,
+    pub threshold: usize,
+    pub analysis_path: PathBuf,
+}
+
 impl StatementCountRule {
     pub fn new() -> Self {
         StatementCountRule
     }
 
     pub fn run(&self, args: &StatementCountArgs) -> Result<()> {
+        let data = self.analyze(args)?;
+
+        match args.output {
+            StatementCountOutputFormat::Table => {
+                println!(
+                    "\nStatement Count Report (analyzing path: {}):",
+                    data.analysis_path.display()
+                );
+                let any_over_threshold =
+                    print_report(&data.component_stats, data.grand_total, data.threshold);
+                if any_over_threshold {
+                    bail!(
+                        "At least one component exceeds {}% of total statements.",
+                        data.threshold
+                    );
+                }
+                println!(
+                    "\nAll components are within {}% threshold. (Total statements = {})",
+                    data.threshold, data.grand_total
+                );
+            }
+            StatementCountOutputFormat::Html => {
+                let html_body = self.render_statement_count_html_body(&data)?;
+                let full_html = html_utils::render_html_doc(
+                    &format!("Statement Count Report: {}", data.analysis_path.display()),
+                    html_body,
+                );
+                println!("{}", full_html);
+                let any_over_threshold =
+                    data.component_stats
+                        .values()
+                        .any(|&(_file_count, st_count)| {
+                            if data.grand_total == 0 {
+                                return false;
+                            }
+                            let percentage = (st_count * 100) / data.grand_total;
+                            percentage > data.threshold
+                        });
+                if any_over_threshold {
+                    bail!(
+                        "At least one component exceeds {}% of total statements (see HTML report for details).",
+                        data.threshold
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn analyze(&self, args: &StatementCountArgs) -> Result<StatementCountData> {
         let threshold = args.threshold;
         let analysis_path = &args.path;
 
@@ -87,60 +147,15 @@ impl StatementCountRule {
             bail!("Error: Total Rust statements = 0. Ensure .rs files contain statements or check parsing. Path: {}", analysis_path.display());
         }
 
-        match args.output {
-            StatementCountOutputFormat::Table => {
-                println!(
-                    "\nStatement Count Report (analyzing path: {}):",
-                    analysis_path.display()
-                );
-                let any_over_threshold = print_report(&component_stats, grand_total, threshold);
-                if any_over_threshold {
-                    bail!(
-                        "At least one component exceeds {}% of total statements.",
-                        threshold
-                    );
-                }
-                println!(
-                    "\nAll components are within {}% threshold. (Total statements = {})",
-                    threshold, grand_total
-                );
-            }
-            StatementCountOutputFormat::Html => {
-                let html_output = self.render_statement_count_html_report(
-                    &component_stats,
-                    grand_total,
-                    threshold,
-                    analysis_path,
-                )?;
-                println!("{}", html_output);
-                let any_over_threshold =
-                    component_stats.values().any(|&(_file_count, st_count)| {
-                        if grand_total == 0 {
-                            return false;
-                        }
-                        let percentage = (st_count * 100) / grand_total;
-                        percentage > threshold
-                    });
-                if any_over_threshold {
-                    bail!(
-                        "At least one component exceeds {}% of total statements (see HTML report for details).",
-                        threshold
-                    );
-                }
-            }
-        }
-        Ok(())
+        Ok(StatementCountData {
+            component_stats,
+            grand_total,
+            threshold,
+            analysis_path: analysis_path.to_path_buf(),
+        })
     }
 
-    fn render_statement_count_html_report(
-        &self,
-        component_stats: &HashMap<String, (usize, usize)>,
-        grand_total: usize,
-        threshold: usize,
-        analysis_path: &Path,
-    ) -> Result<String> {
-        let title = format!("Statement Count Report: {}", analysis_path.display());
-
+    pub fn render_statement_count_html_body(&self, data: &StatementCountData) -> Result<Markup> {
         let explanations_data = [
             ("Component", "Name of the top-level component (e.g., directory under src/, or crate name)."),
             ("File Count", "Number of .rs files within this component."),
@@ -149,12 +164,12 @@ impl StatementCountRule {
         ];
         let explanations_markup = html_utils::render_metric_explanation_list(&explanations_data);
 
-        let mut sorted_components: Vec<_> = component_stats.iter().collect();
+        let mut sorted_components: Vec<_> = data.component_stats.iter().collect();
         sorted_components.sort_by_key(|&(name, _)| name.clone());
 
         let table_markup = html! {
             table class="sortable-table" {
-                caption { (format!("Analysis Path: {}. Threshold: {}%", analysis_path.display(), threshold)) }
+                caption { (format!("Analysis Path: {}. Threshold: {}%", data.analysis_path.display(), data.threshold)) }
                 thead {
                     tr {
                         th class="sortable-header" data-column-index="0" data-sort-type="string" { "Component" }
@@ -165,8 +180,8 @@ impl StatementCountRule {
                 }
                 tbody {
                     @for (name, (file_count, st_count)) in sorted_components {
-                        @let percentage = if grand_total > 0 { (*st_count * 100) / grand_total } else { 0 };
-                        @let percentage_style = html_utils::get_cell_style(percentage as f64, threshold as f64, threshold as f64, false);
+                        @let percentage = if data.grand_total > 0 { (*st_count * 100) / data.grand_total } else { 0 };
+                        @let percentage_style = html_utils::get_cell_style(percentage as f64, data.threshold as f64, data.threshold as f64, false);
                         tr {
                             td { (name) }
                             td { (file_count) }
@@ -180,30 +195,28 @@ impl StatementCountRule {
 
         let summary_markup = html! {
             p {
-                b { "Grand Total Statements: " (grand_total) }
+                b { "Grand Total Statements: " (data.grand_total) }
             }
-            @let any_over_threshold = component_stats.values().any(|&(_file_count, st_count)| {
-                if grand_total == 0 { return false; }
-                let percentage = (st_count * 100) / grand_total;
-                percentage > threshold
+            @let any_over_threshold = data.component_stats.values().any(|&(_file_count, st_count)| {
+                if data.grand_total == 0 { return false; }
+                let percentage = (st_count * 100) / data.grand_total;
+                percentage > data.threshold
             });
             @if any_over_threshold {
                 p style="color: red;" {
-                    b { "Warning: At least one component exceeds the " (threshold) "% threshold." }
+                    b { "Warning: At least one component exceeds the " (data.threshold) "% threshold." }
                 }
             } @else {
                 p style="color: green;" {
-                    "All components are within the " (threshold) "% threshold."
+                    "All components are within the " (data.threshold) "% threshold."
                 }
             }
         };
 
-        let body_content = html! {
+        Ok(html! {
             (explanations_markup)
             (table_markup)
             (summary_markup)
-        };
-
-        Ok(html_utils::render_html_doc(&title, body_content))
+        })
     }
 }

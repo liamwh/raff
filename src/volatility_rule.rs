@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, TimeZone, Utc}; // For parsing --since date
 use git2::{DiffOptions, Repository, Sort, TreeWalkMode, TreeWalkResult};
+use maud::{html, Markup};
 use prettytable::{format, Cell, Row, Table}; // Added for table output
 use serde::Serialize; // Added for custom output struct
                       // Ensure serde_json is explicitly imported
@@ -10,31 +11,33 @@ use std::io::{BufRead, BufReader}; // For reading files line by line in LoC calc
 use std::path::{Path, PathBuf};
 use toml::Value as TomlValue;
 // Added import for tracing
-use maud::html;
 use walkdir::WalkDir; // For recursively finding Cargo.toml files // For parsing Cargo.toml
 
 use crate::cli::{VolatilityArgs, VolatilityOutputFormat}; // Ensure VolatilityOutputFormat is imported
 use crate::html_utils; // Import the new HTML utilities
 
 /// Represents the statistics gathered for a single crate.
-#[derive(Debug, Default, Clone)] // Clone is useful for initialization
+#[derive(Debug, Default, Clone, Serialize)] // Clone is useful for initialization
 pub struct CrateStats {
     /// The root directory path of the crate, relative to the repository root.
-    root_path: PathBuf,
+    pub root_path: PathBuf,
     /// Number of commits that touched this crate at least once.
-    commit_touch_count: usize,
+    pub commit_touch_count: usize,
     /// Total lines inserted into this crate across all relevant commits.
-    lines_added: usize,
+    pub lines_added: usize,
     /// Total lines removed from this crate across all relevant commits.
-    lines_deleted: usize,
+    pub lines_deleted: usize,
     /// Raw volatility score.
-    raw_score: f64,
+    pub raw_score: f64,
     /// (Optional) Total lines of code, used for normalization.
-    total_loc: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_loc: Option<usize>,
     /// (Optional) Normalized volatility score.
-    normalized_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub normalized_score: Option<f64>,
     /// (Optional) Timestamp of the first commit where this crate appeared.
-    birth_commit_time: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birth_commit_time: Option<i64>,
 }
 
 /// Holds information about a discovered crate.
@@ -64,6 +67,14 @@ struct CrateVolatilityDataForOutput<'a> {
     raw_score: f64,
     #[serde(skip_serializing_if = "Option::is_none")] // Only include if normalize was true
     normalized_score: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VolatilityData {
+    pub crate_stats_map: CrateStatsMap,
+    pub normalize: bool,
+    pub alpha: f64,
+    pub analysis_path: PathBuf,
 }
 
 impl VolatilityRule {
@@ -385,17 +396,22 @@ impl VolatilityRule {
 
             for (crate_name, stats) in crate_stats_map.iter_mut() {
                 if stats.birth_commit_time.is_none() {
+                    let mut found_birth = false;
                     tree.walk(TreeWalkMode::PreOrder, |path_from_tree_root, entry| {
                         let entry_path_relative_to_repo = Path::new(path_from_tree_root).join(entry.name().unwrap_or_default());
 
                         if entry_path_relative_to_repo.starts_with(&stats.root_path) {
                             stats.birth_commit_time = Some(commit_time);
                             tracing::debug!(%crate_name, commit_oid = %commit.id(), %commit_time, path_found = %entry_path_relative_to_repo.display(), "Set birth time for crate");
-                            crates_needing_birth_time -= 1;
+                            found_birth = true;
                             return TreeWalkResult::Skip;
                         }
                         TreeWalkResult::Ok
                     }).with_context(|| format!("Error walking tree for commit {} to find birth of crate {}", commit.id(), crate_name))?;
+
+                    if found_birth {
+                        crates_needing_birth_time -= 1;
+                    }
                 }
             }
 
@@ -417,75 +433,70 @@ impl VolatilityRule {
         Ok(())
     }
 
-    fn render_volatility_html_report(
+    pub fn render_volatility_html_body(
         &self,
         sorted_crates: &[(&String, &CrateStats)],
         normalize: bool,
         alpha: f64,
-        analysis_path_canonical: &Path,
-    ) -> Result<String> {
-        let title = format!("Volatility Report: {}", analysis_path_canonical.display());
-
-        let mut metric_explanations_data = vec![
+    ) -> Result<Markup> {
+        let explanations_data = [
             ("Crate Name", "The name of the crate as defined in its Cargo.toml."),
-            ("Birth Date", "Approx. date (YYYY-MM-DD) the crate first appeared in history."),
-            ("Touches", "Number of commits that modified this crate within the analysis window. Higher is more volatile."),
-            ("Added", "Total lines of code added to this crate. Higher is more volatile."),
-            ("Deleted", "Total lines of code deleted from this crate. Higher is more volatile."),
+            ("Birth Date", "The date of the first commit where this crate's Cargo.toml appeared. 'N/A' if not found in history."),
+            ("Commit Touches", "The number of commits (since the specified date) that modified any file within this crate."),
+            ("Lines Added", "Total number of lines added to .rs files in this crate."),
+            ("Lines Deleted", "Total number of lines deleted from .rs files in this crate."),
+            ("Raw Score", "A combined metric calculated as: (Lines Added + Lines Deleted) + α * (Commit Touches). A higher score indicates higher churn/activity."),
         ];
+        let mut explanations_data_vec = explanations_data.to_vec();
+
         if normalize {
-            metric_explanations_data.push((
-                "Total LoC",
-                "Total non-blank lines of Rust code in the crate (used for normalization).",
-            ));
-        }
-        let raw_score_explanation_string = format!("Calculated as 'Touches + (alpha * (Added + Deleted))'. Alpha = {:.4}. Higher score indicates more change activity.", alpha);
-        metric_explanations_data.push(("Raw Score", &raw_score_explanation_string));
-        if normalize {
-            metric_explanations_data.push(("Norm Score", "'Raw Score / Total LoC'. Volatility relative to crate size. Higher is more volatile."));
+            explanations_data_vec.extend(&[
+                ("Total LoC", "Total lines of code in the crate's .rs files (non-empty lines)."),
+                ("Normalized Score", "The Raw Score divided by the Total LoC. Provides a size-independent measure of volatility."),
+            ]);
         }
         let explanations_markup =
-            html_utils::render_metric_explanation_list(&metric_explanations_data);
+            html_utils::render_metric_explanation_list(&explanations_data_vec);
 
-        // Prepare MetricRanges for color scaling
-        let touches_values: Vec<f64> = sorted_crates
-            .iter()
-            .map(|(_, s)| s.commit_touch_count as f64)
-            .collect();
         let added_values: Vec<f64> = sorted_crates
             .iter()
-            .map(|(_, s)| s.lines_added as f64)
+            .map(|s| s.1.lines_added as f64)
             .collect();
         let deleted_values: Vec<f64> = sorted_crates
             .iter()
-            .map(|(_, s)| s.lines_deleted as f64)
+            .map(|s| s.1.lines_deleted as f64)
             .collect();
-        let raw_score_values: Vec<f64> = sorted_crates.iter().map(|(_, s)| s.raw_score).collect();
-        let norm_score_values: Vec<f64> = sorted_crates
+        let touches_values: Vec<f64> = sorted_crates
             .iter()
-            .filter_map(|(_, s)| s.normalized_score)
+            .map(|s| s.1.commit_touch_count as f64)
+            .collect();
+        let raw_score_values: Vec<f64> = sorted_crates.iter().map(|s| s.1.raw_score).collect();
+        let normalized_score_values: Vec<f64> = sorted_crates
+            .iter()
+            .filter_map(|s| s.1.normalized_score)
             .collect();
 
-        let touches_ranges = html_utils::MetricRanges::from_values(&touches_values, false);
         let added_ranges = html_utils::MetricRanges::from_values(&added_values, false);
         let deleted_ranges = html_utils::MetricRanges::from_values(&deleted_values, false);
+        let touches_ranges = html_utils::MetricRanges::from_values(&touches_values, false);
         let raw_score_ranges = html_utils::MetricRanges::from_values(&raw_score_values, false);
-        let norm_score_ranges = html_utils::MetricRanges::from_values(&norm_score_values, false);
+        let norm_score_ranges =
+            html_utils::MetricRanges::from_values(&normalized_score_values, false);
 
         let table_markup = html! {
             table class="sortable-table" {
-                caption { (format!("Volatility Metrics (Alpha: {:.4}, Normalized: {})", alpha, normalize)) }
+                caption { (format!("Volatility calculated with α (touch weight) = {}", alpha)) }
                 thead {
                     tr {
                         th class="sortable-header" data-column-index="0" data-sort-type="string" { "Crate Name" }
                         th class="sortable-header" data-column-index="1" data-sort-type="string" { "Birth Date" }
-                        th class="sortable-header" data-column-index="2" data-sort-type="number" { "Touches" }
-                        th class="sortable-header" data-column-index="3" data-sort-type="number" { "Added" }
-                        th class="sortable-header" data-column-index="4" data-sort-type="number" { "Deleted" }
+                        th class="sortable-header" data-column-index="2" data-sort-type="number" { "Commit Touches" }
+                        th class="sortable-header" data-column-index="3" data-sort-type="number" { "Lines Added" }
+                        th class="sortable-header" data-column-index="4" data-sort-type="number" { "Lines Deleted" }
                         @if normalize {
                             th class="sortable-header" data-column-index="5" data-sort-type="number" { "Total LoC" }
                             th class="sortable-header" data-column-index="6" data-sort-type="number" { "Raw Score" }
-                            th class="sortable-header" data-column-index="7" data-sort-type="number" { "Norm Score" }
+                            th class="sortable-header" data-column-index="7" data-sort-type="number" { "Normalized Score" }
                         } @else {
                             th class="sortable-header" data-column-index="5" data-sort-type="number" { "Raw Score" }
                         }
@@ -495,7 +506,7 @@ impl VolatilityRule {
                     @for (name, stats) in sorted_crates {
                         @let birth_date_str = stats.birth_commit_time.map_or_else(
                             || "N/A".to_string(),
-                            |ts| DateTime::from_timestamp(ts, 0).map_or_else(
+                            |dt| Utc.timestamp_opt(dt, 0).single().map_or_else(
                                 || "Invalid Date".to_string(),
                                 |dt| dt.format("%Y-%m-%d").to_string()
                             )
@@ -520,16 +531,126 @@ impl VolatilityRule {
             }
         };
 
-        let body_content = html! {
+        Ok(html! {
             (explanations_markup)
             (table_markup)
-        };
-
-        Ok(html_utils::render_html_doc(&title, body_content))
+        })
     }
 
     #[tracing::instrument(level = "debug", skip_all, err)]
     pub fn run(&self, args: &VolatilityArgs) -> Result<()> {
+        let data = self.analyze(args)?;
+
+        // Sort crates by raw_score (descending) for display
+        let mut sorted_crates: Vec<_> = data.crate_stats_map.iter().collect();
+        sorted_crates.sort_by(|a, b| {
+            b.1.raw_score
+                .partial_cmp(&a.1.raw_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Print output based on format
+        match &args.output {
+            VolatilityOutputFormat::Table => {
+                self.print_volatility_table(&sorted_crates, data.normalize, data.alpha)
+            }
+            output_format @ (VolatilityOutputFormat::Json
+            | VolatilityOutputFormat::Yaml
+            | VolatilityOutputFormat::Csv) => {
+                let output_data: Vec<CrateVolatilityDataForOutput> = sorted_crates
+                    .iter()
+                    .map(|(name, stats)| CrateVolatilityDataForOutput {
+                        crate_name: name,
+                        birth_date: stats.birth_commit_time.map_or_else(
+                            || "N/A".to_string(),
+                            |ts| {
+                                DateTime::from_timestamp(ts, 0)
+                                    .unwrap_or_default()
+                                    .format("%Y-%m-%d")
+                                    .to_string()
+                            },
+                        ),
+                        commit_touch_count: stats.commit_touch_count,
+                        lines_added: stats.lines_added,
+                        lines_deleted: stats.lines_deleted,
+                        total_loc: stats.total_loc,
+                        raw_score: stats.raw_score,
+                        normalized_score: stats.normalized_score,
+                    })
+                    .collect();
+
+                match output_format {
+                    VolatilityOutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&output_data)?);
+                    }
+                    VolatilityOutputFormat::Yaml => {
+                        println!("{}", serde_yaml::to_string(&output_data)?);
+                    }
+                    VolatilityOutputFormat::Csv => {
+                        let mut wtr = csv::WriterBuilder::new()
+                            .has_headers(true)
+                            .from_writer(vec![]);
+                        // Write header conditionally
+                        let mut headers_vec = vec![
+                            "crate_name",
+                            "birth_date",
+                            "commit_touch_count",
+                            "lines_added",
+                            "lines_deleted",
+                            "raw_score",
+                        ];
+                        if data.normalize {
+                            headers_vec.push("total_loc");
+                            headers_vec.push("normalized_score");
+                        }
+                        wtr.write_record(&headers_vec)?;
+
+                        for record in &output_data {
+                            let mut row = vec![
+                                record.crate_name.to_string(),
+                                record.birth_date.clone(),
+                                record.commit_touch_count.to_string(),
+                                record.lines_added.to_string(),
+                                record.lines_deleted.to_string(),
+                                record.raw_score.to_string(),
+                            ];
+                            if data.normalize {
+                                row.push(
+                                    record
+                                        .total_loc
+                                        .map_or("N/A".to_string(), |v| v.to_string()),
+                                );
+                                row.push(
+                                    record
+                                        .normalized_score
+                                        .map_or("N/A".to_string(), |v| v.to_string()),
+                                );
+                            }
+                            wtr.write_record(&row)?;
+                        }
+
+                        let csv_string = String::from_utf8(wtr.into_inner()?)?;
+                        println!("{}", csv_string);
+                    }
+                    _ => unreachable!(), // Should not happen given the parent match arm
+                }
+            }
+            VolatilityOutputFormat::Html => {
+                let html_body =
+                    self.render_volatility_html_body(&sorted_crates, data.normalize, data.alpha)?;
+                let full_html = html_utils::render_html_doc(
+                    &format!("Volatility Report: {}", data.analysis_path.display()),
+                    html_body,
+                );
+                println!("{}", full_html);
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "debug", skip_all, err)]
+    pub fn analyze(&self, args: &VolatilityArgs) -> Result<VolatilityData> {
         let analysis_path = &args.path;
         let analysis_path_canonical = analysis_path
             .canonicalize()
@@ -696,107 +817,11 @@ impl VolatilityRule {
             }
         }
 
-        // Sort crates by raw_score (descending) for display
-        let mut sorted_crates: Vec<_> = crate_stats_map.iter().collect();
-        sorted_crates.sort_by(|a, b| {
-            b.1.raw_score
-                .partial_cmp(&a.1.raw_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        // Print output based on format
-        match &args.output {
-            VolatilityOutputFormat::Table => {
-                self.print_volatility_table(&sorted_crates, args.normalize, args.alpha)
-            }
-            output_format @ (VolatilityOutputFormat::Json
-            | VolatilityOutputFormat::Yaml
-            | VolatilityOutputFormat::Csv) => {
-                let output_data: Vec<CrateVolatilityDataForOutput> = sorted_crates
-                    .iter()
-                    .map(|(name, stats)| CrateVolatilityDataForOutput {
-                        crate_name: name,
-                        birth_date: stats.birth_commit_time.map_or_else(
-                            || "N/A".to_string(),
-                            |ts| {
-                                DateTime::from_timestamp(ts, 0)
-                                    .unwrap_or_default()
-                                    .format("%Y-%m-%d")
-                                    .to_string()
-                            },
-                        ),
-                        commit_touch_count: stats.commit_touch_count,
-                        lines_added: stats.lines_added,
-                        lines_deleted: stats.lines_deleted,
-                        total_loc: stats.total_loc,
-                        raw_score: stats.raw_score,
-                        normalized_score: stats.normalized_score,
-                    })
-                    .collect();
-
-                match output_format {
-                    VolatilityOutputFormat::Json => {
-                        println!("{}", serde_json::to_string_pretty(&output_data)?);
-                    }
-                    VolatilityOutputFormat::Yaml => {
-                        println!("{}", serde_yaml::to_string(&output_data)?);
-                    }
-                    VolatilityOutputFormat::Csv => {
-                        let mut wtr = csv::WriterBuilder::new()
-                            .has_headers(true)
-                            .from_writer(vec![]);
-                        // Write header conditionally
-                        let mut headers_vec = vec![
-                            "crate_name",
-                            "birth_date",
-                            "commit_touch_count",
-                            "lines_added",
-                            "lines_deleted",
-                            "raw_score",
-                        ];
-                        if args.normalize {
-                            headers_vec.insert(5, "total_loc");
-                            headers_vec.push("normalized_score");
-                        }
-                        wtr.write_record(&headers_vec)?;
-                        for item in output_data {
-                            let mut record = vec![
-                                item.crate_name.to_string(),
-                                item.birth_date.to_string(),
-                                item.commit_touch_count.to_string(),
-                                item.lines_added.to_string(),
-                                item.lines_deleted.to_string(),
-                            ];
-                            if args.normalize {
-                                record.push(
-                                    item.total_loc.map_or_else(String::new, |v| v.to_string()),
-                                );
-                            }
-                            record.push(format!("{:.2}", item.raw_score));
-                            if args.normalize {
-                                record.push(
-                                    item.normalized_score
-                                        .map_or_else(String::new, |v| format!("{:.2}", v)),
-                                );
-                            }
-                            wtr.write_record(&record)?;
-                        }
-                        let csv_string = String::from_utf8(wtr.into_inner()?)?;
-                        println!("{}", csv_string);
-                    }
-                    _ => unreachable!(), // Other variants handled by outer match
-                }
-            }
-            VolatilityOutputFormat::Html => {
-                let html_output = self.render_volatility_html_report(
-                    &sorted_crates,
-                    args.normalize,
-                    args.alpha,
-                    &analysis_path_canonical,
-                )?;
-                println!("{}", html_output);
-            }
-        }
-        Ok(())
+        Ok(VolatilityData {
+            crate_stats_map,
+            normalize: args.normalize,
+            alpha: args.alpha,
+            analysis_path: analysis_path_canonical,
+        })
     }
 }

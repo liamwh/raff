@@ -72,6 +72,7 @@ raff <COMMAND> --help
 
 ## TODOs / Future Work 🗺️
 
+$$
 The following enhancements are planned or could be valuable additions:
 
 * [ ] 🔶 FF: Do any domain objects use primitive types? (e.g. `String` instead of `Name`).
