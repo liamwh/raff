@@ -151,20 +151,31 @@ impl RustCodeAnalysisRule {
         let analysis_path = PathBuf::from(&args.path);
 
         tracing::info!(
-            "Starting directory discovery in: {}",
-            analysis_path.display()
+            "Starting file discovery in: {} for language {}",
+            analysis_path.display(),
+            args.language
         );
-        let src_paths_args = discover_src_directories(&analysis_path, args).with_context(|| {
-            format!(
-                "Failed to discover source directories in {}",
-                analysis_path.display()
-            )
-        })?;
 
-        tracing::debug!("Discovered src paths for CLI: {:?}", src_paths_args);
+        let file_path_args = discover_and_filter_files(&analysis_path, &args.language)
+            .with_context(|| {
+                format!(
+                    "Failed to discover source files in {}",
+                    analysis_path.display()
+                )
+            })?;
+
+        if file_path_args.is_empty() {
+            println!(
+                "No files matching language '{:?}' found in path '{:?}'.",
+                args.language, args.path
+            );
+            return Ok(());
+        }
+
+        tracing::debug!("Discovered files for CLI: {:?}", file_path_args);
 
         let mut cmd_args = Vec::new();
-        cmd_args.extend(src_paths_args);
+        cmd_args.extend(file_path_args);
 
         cmd_args.push("-l".to_string());
         cmd_args.push(args.language.clone());
@@ -570,67 +581,168 @@ fn print_analysis_table(analysis_results: &[AnalysisUnit], project_root: &Path) 
     Ok(())
 }
 
-#[instrument(skip(_args))]
-fn discover_src_directories(
-    root_dir: &PathBuf,
-    _args: &RustCodeAnalysisArgs,
-) -> Result<Vec<String>> {
-    let mut src_paths = Vec::new();
+fn get_extension_for_language(language: &str) -> Option<&str> {
+    match language {
+        "rust" => Some(".rs"),
+        // Future extensions for other languages can be added here.
+        _ => None,
+    }
+}
+
+#[instrument]
+fn discover_and_filter_files(root_dir: &PathBuf, language: &str) -> Result<Vec<String>> {
     if !root_dir.exists() {
         return Err(anyhow::anyhow!(
-            "Root directory not found: {}",
-            root_dir.display()
-        ));
-    }
-    if !root_dir.is_dir() {
-        return Err(anyhow::anyhow!(
-            "Root path is not a directory: {}",
+            "Root path not found: {}",
             root_dir.display()
         ));
     }
 
-    let walker = walkdir::WalkDir::new(root_dir).into_iter();
+    // If a specific file extension is known for the language, walk the directory and find all matching files.
+    if let Some(extension) = get_extension_for_language(language) {
+        let mut discovered_files = Vec::new();
+        let walker = walkdir::WalkDir::new(root_dir).into_iter();
 
-    for entry_result in walker.filter_entry(|e| {
-        let path = e.path();
-        if path.to_str().is_none() {
-            tracing::warn!("Skipping path with invalid Unicode: {:?}", path);
-            return false;
-        }
-        let file_name = path.file_name().unwrap_or_default();
-
-        if e.file_type().is_dir() && (file_name == "target" || file_name == "frontend") {
-            return false;
-        }
-        true
-    }) {
-        match entry_result {
-            Ok(entry) => {
-                if entry.file_type().is_dir() && entry.file_name() == "src" {
-                    let path_str = entry.path().to_str().ok_or_else(|| {
-                        anyhow::anyhow!("Path contains invalid Unicode: {:?}", entry.path())
-                    })?;
-                    src_paths.push("-p".to_string());
-                    src_paths.push(path_str.to_string());
-                    tracing::debug!("Found 'src' directory: {}", path_str);
+        for entry_result in walker.filter_entry(|e| {
+            if e.file_type().is_dir() {
+                let file_name = e.file_name().to_string_lossy();
+                if file_name == "target"
+                    || file_name == "frontend"
+                    || file_name == "node_modules"
+                    || file_name == ".git"
+                {
+                    return false; // Skip these directories
                 }
             }
-            Err(e) => {
-                tracing::warn!(
-                    "Error accessing entry in {}: {}. Skipping.",
-                    root_dir.display(),
-                    e
-                );
+            true
+        }) {
+            match entry_result {
+                Ok(entry) => {
+                    if entry.file_type().is_file() {
+                        if let Some(path_str) = entry.path().to_str() {
+                            if path_str.ends_with(extension) {
+                                discovered_files.push(path_str.to_string());
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Error accessing entry in {}: {}. Skipping.",
+                        root_dir.display(),
+                        e
+                    );
+                }
             }
         }
+
+        let mut file_path_args = Vec::new();
+        for file in discovered_files {
+            file_path_args.push("-p".to_string());
+            file_path_args.push(file);
+        }
+        Ok(file_path_args)
+    } else {
+        // Fallback for languages without a specified extension: pass the path directly to the CLI tool.
+        let path_str = root_dir
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Path contains invalid Unicode: {:?}", root_dir))?;
+        Ok(vec!["-p".to_string(), path_str.to_string()])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_discover_and_filter_files_rust() {
+        // Setup a temporary directory with a structure for testing
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Create files and directories
+        fs::write(root.join("file1.rs"), b"fn main() {}").unwrap();
+        fs::write(root.join("another.txt"), b"some text").unwrap();
+
+        let src_dir = root.join("src");
+        fs::create_dir(&src_dir).unwrap();
+        fs::write(src_dir.join("file2.rs"), b"// rust code").unwrap();
+
+        let nested_dir = src_dir.join("nested");
+        fs::create_dir(&nested_dir).unwrap();
+        fs::write(nested_dir.join("file3.rs"), b"// more rust").unwrap();
+
+        // Create directories and files that should be ignored
+        let target_dir = root.join("target");
+        fs::create_dir(&target_dir).unwrap();
+        fs::write(target_dir.join("ignored.rs"), b"").unwrap();
+
+        let node_modules_dir = root.join("node_modules");
+        fs::create_dir(&node_modules_dir).unwrap();
+        fs::write(node_modules_dir.join("ignored.rs"), b"").unwrap();
+
+        // Run the discovery function
+        let result = discover_and_filter_files(&root.to_path_buf(), "rust").unwrap();
+
+        // The result should be a Vec of strings like ["-p", "/path/to/file1.rs", "-p", "/path/to/file2.rs", ...]
+        // So we expect 3 files, which means 6 elements in the vec.
+        assert_eq!(result.len(), 6, "Should find 3 Rust files");
+
+        // Convert to a HashSet for easier comparison, ignoring the order and the "-p" flags.
+        let result_files: std::collections::HashSet<String> =
+            result.chunks(2).map(|chunk| chunk[1].clone()).collect();
+
+        let expected_files: std::collections::HashSet<String> = [
+            root.join("file1.rs"),
+            src_dir.join("file2.rs"),
+            nested_dir.join("file3.rs"),
+        ]
+        .iter()
+        .map(|p| p.to_str().unwrap().to_string())
+        .collect();
+
+        assert_eq!(result_files, expected_files);
     }
 
-    if src_paths.is_empty() {
-        return Err(anyhow::anyhow!(
-            "No 'src' directories found (excluding 'target' and 'frontend') in {}",
-            root_dir.display()
-        ));
+    #[test]
+    fn test_no_matching_files_found() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("file1.txt"), b"hello").unwrap();
+        fs::write(root.join("file2.js"), b"world").unwrap();
+
+        let result = discover_and_filter_files(&root.to_path_buf(), "rust").unwrap();
+        assert!(
+            result.is_empty(),
+            "Should return an empty vec when no .rs files are found"
+        );
     }
 
-    Ok(src_paths)
+    #[test]
+    fn test_unsupported_language_fallback() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let root_str = root.to_str().unwrap().to_string();
+
+        let result = discover_and_filter_files(&root.to_path_buf(), "javascript").unwrap();
+
+        assert_eq!(
+            result,
+            vec!["-p".to_string(), root_str],
+            "Should fall back to passing the root directory for unsupported languages"
+        );
+    }
+
+    #[test]
+    fn test_non_existent_path() {
+        let path = PathBuf::from("/non/existent/path/that/should/not/be/real");
+        let result = discover_and_filter_files(&path, "rust");
+        assert!(
+            result.is_err(),
+            "Should return an error for a non-existent path"
+        );
+    }
 }
