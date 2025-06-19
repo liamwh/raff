@@ -1,28 +1,12 @@
 //! rust-ff: A collection of Rust code analysis tools and fitness functions.
 
-mod all_rules;
-mod cli;
-mod contributor_report;
-mod counter;
-mod coupling_rule;
-mod file_utils;
-mod html_utils;
-mod reporting;
-mod rust_code_analysis_rule;
-mod statement_count_rule;
-mod table_utils;
-mod volatility_rule;
-
 use anyhow::Result;
 use clap::Parser;
+use raff_cli::{
+    all_rules, Cli, Commands, ContributorReportRule, CouplingRule, RustCodeAnalysisRule,
+    StatementCountRule, VolatilityRule,
+};
 use std::process::exit;
-
-use crate::cli::{Cli, Commands};
-use crate::contributor_report::ContributorReportRule;
-use crate::coupling_rule::CouplingRule;
-use crate::rust_code_analysis_rule::RustCodeAnalysisRule;
-use crate::statement_count_rule::StatementCountRule;
-use crate::volatility_rule::VolatilityRule;
 
 fn main() -> Result<()> {
     // Initialize color-eyre for better error reporting
