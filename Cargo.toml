@@ -6,6 +6,10 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/liamwh/raff"
 
+[lib]
+name = "raff_core"
+path = "src/lib.rs"
+
 [[bin]]
 name = "raff"
 path = "src/main.rs"
