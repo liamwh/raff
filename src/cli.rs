@@ -29,6 +29,8 @@ pub enum Commands {
     RustCodeAnalysis(RustCodeAnalysisArgs),
     /// Runs all analyses and generates a consolidated report.
     All(AllArgs),
+    /// Produces a contributor report, ranking committers by their contribution stats.
+    ContributorReport(ContributorReportArgs),
 }
 
 /// Enum representing the supported output formats for the statement count report.
@@ -233,4 +235,34 @@ pub struct AllArgs {
     /// Language to analyze.
     #[clap(short = 'l', long = "rca_language", default_value = "rust")]
     pub rca_language: String,
+}
+
+/// Enum representing the supported output formats for the contributor report.
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum ContributorReportOutputFormat {
+    #[default]
+    Table,
+    Html,
+    Json,
+    Yaml,
+}
+
+/// Arguments for the `contributor-report` subcommand.
+#[derive(Args, Debug)]
+pub struct ContributorReportArgs {
+    /// Path to the Git repository to analyze.
+    #[clap(long, short, default_value = ".")]
+    pub path: std::path::PathBuf,
+
+    /// Analyze commits since this date (YYYY-MM-DD).
+    #[clap(long)]
+    pub since: Option<String>,
+
+    /// Exponential decay factor for recency weighting (e.g., 0.01).
+    #[clap(long, default_value_t = 0.01)]
+    pub decay: f64,
+
+    /// Output format for the report.
+    #[clap(long, value_enum, default_value_t = ContributorReportOutputFormat::default())]
+    pub output: ContributorReportOutputFormat,
 }

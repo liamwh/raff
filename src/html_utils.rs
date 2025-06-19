@@ -1,7 +1,9 @@
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
 // Styles remain largely the same, but will be embedded directly by Maud
-const CSS_STYLES: &str = include_str!("styles.css");
+pub(crate) fn get_styles() -> &'static str {
+    include_str!("styles.css")
+}
 
 const TABLE_SORTING_JS: &str = include_str!("table_sorter.js");
 
@@ -14,7 +16,7 @@ pub fn render_html_doc(title_text: &str, body_content: Markup) -> String {
                 meta charset="UTF-8";
                 meta name="viewport" content="width=device-width, initial-scale=1.0";
                 title { (title_text) }
-                style { (PreEscaped(CSS_STYLES)) }
+                style { (PreEscaped(get_styles())) }
             }
             body {
                 h1 { (title_text) }

@@ -2,6 +2,7 @@
 
 mod all_rules;
 mod cli;
+mod contributor_report;
 mod counter;
 mod coupling_rule;
 mod file_utils;
@@ -17,6 +18,7 @@ use clap::Parser;
 use std::process::exit;
 
 use crate::cli::{Cli, Commands};
+use crate::contributor_report::ContributorReportRule;
 use crate::coupling_rule::CouplingRule;
 use crate::rust_code_analysis_rule::RustCodeAnalysisRule;
 use crate::statement_count_rule::StatementCountRule;
@@ -62,6 +64,11 @@ fn main() -> Result<()> {
         Commands::All(args) => {
             tracing::info!("Running all rules with args: {:?}", args);
             all_rules::run_all(&args)
+        }
+        Commands::ContributorReport(args) => {
+            let rule = ContributorReportRule::new();
+            tracing::info!("Running ContributorReport rule with args: {:?}", args);
+            rule.run(&args)
         }
     };
 
