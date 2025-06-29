@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2025-06-29
+
+### Features
+
+- Add contributor report ([`f4fdb10`](f4fdb103a78f6fea63548e0da52b2ed139f60051))
+- Add examples ([`57710e4`](57710e4e65decab643d30035dc11e704ad18a7c1))
+
+### Miscellaneous Tasks
+
+- Improve linting ([`2660c80`](2660c802a99d003dae49ee070d1fdea744dfc55f))
+
+
 ## [0.1.3] - 2025-06-18
 
 ### Bug Fixes
