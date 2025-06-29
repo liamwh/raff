@@ -2,11 +2,7 @@ use anyhow::{bail, Context, Result};
 use maud::html;
 use maud::Markup;
 use serde::Serialize;
-use std::{
-    collections::HashMap,
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, fs, path::PathBuf};
 use syn::visit::Visit;
 use syn::File as SynFile;
 
@@ -61,7 +57,7 @@ impl StatementCountRule {
                     &format!("Statement Count Report: {}", data.analysis_path.display()),
                     html_body,
                 );
-                println!("{}", full_html);
+                println!("{full_html}");
                 let any_over_threshold =
                     data.component_stats
                         .values()

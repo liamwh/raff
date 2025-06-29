@@ -5,6 +5,12 @@ pub struct StmtCounter {
     pub count: usize,
 }
 
+impl Default for StmtCounter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StmtCounter {
     /// Create a new, empty `StmtCounter`.
     pub fn new() -> Self {

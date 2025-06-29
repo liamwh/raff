@@ -81,6 +81,12 @@ pub struct CouplingData {
 
 pub struct CouplingRule;
 
+impl Default for CouplingRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CouplingRule {
     pub fn new() -> Self {
         Self
@@ -96,11 +102,11 @@ impl CouplingRule {
             }
             CouplingOutputFormat::Json => {
                 let json = serde_json::to_string_pretty(&full_report)?;
-                println!("{}", json);
+                println!("{json}");
             }
             CouplingOutputFormat::Yaml => {
                 let yaml = serde_yaml::to_string(&full_report)?;
-                println!("{}", yaml);
+                println!("{yaml}");
             }
             CouplingOutputFormat::Html => {
                 let html_body = self.render_coupling_html_body(&full_report)?;
@@ -108,7 +114,7 @@ impl CouplingRule {
                     &format!("Coupling Report: {}", &full_report.analysis_path.display()),
                     html_body,
                 );
-                println!("{}", full_html);
+                println!("{full_html}");
             }
             CouplingOutputFormat::Dot => {
                 self.print_dot_report(&full_report, &full_report.granularity)?;
@@ -577,7 +583,7 @@ impl CouplingRule {
             CouplingGranularity::Crate | CouplingGranularity::Both
         ) {
             let dot_string = self.generate_crate_dot(report)?;
-            println!("{}", dot_string);
+            println!("{dot_string}");
         }
 
         if matches!(
@@ -592,7 +598,7 @@ impl CouplingRule {
                 ); // Separator if printing both
             }
             let dot_string = self.generate_module_dot(report)?;
-            println!("{}", dot_string);
+            println!("{dot_string}");
         }
         Ok(())
     }
@@ -602,7 +608,7 @@ impl CouplingRule {
         if max_value == 0.0 {
             return "0.33,1.0,0.7".to_string(); // Light green for no coupling or single element
         }
-        let normalized = (value / max_value).max(0.0).min(1.0); // Clamp between 0 and 1
+        let normalized = (value / max_value).clamp(0.0, 1.0); // Clamp between 0 and 1
         let hue = 0.33 * (1.0 - normalized); // 0.33 (green) to 0.0 (red)
         format!("{:.2},{:.1},{:.1}", hue, 1.0, 0.5) // HSL format
     }
@@ -736,8 +742,7 @@ impl CouplingRule {
                     // Avoid self-loops in visualization if path resolves to same node id
                     if current_module_node_id != target_module_node_id {
                         dot.push_str(&format!(
-                            "  \"{}\" -> \"{}\";\n",
-                            current_module_node_id, target_module_node_id
+                            "  \"{current_module_node_id}\" -> \"{target_module_node_id}\";\n"
                         ));
                     }
                 }
@@ -784,7 +789,7 @@ impl CouplingRule {
                     base_mod_path.join(mod_name.clone())
                 };
                 let new_base_mod_path_str = if base_mod_path.to_string_lossy() == "crate" {
-                    format!("crate::{}", mod_name)
+                    format!("crate::{mod_name}")
                 } else {
                     format!("{}::{}", base_mod_path.to_string_lossy(), mod_name)
                 };
@@ -803,7 +808,7 @@ impl CouplingRule {
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                     let mod_name = stem.to_string();
                     let mod_path_str = if base_mod_path.to_string_lossy() == "crate" {
-                        format!("crate::{}", mod_name)
+                        format!("crate::{mod_name}")
                     } else {
                         format!("{}::{}", base_mod_path.to_string_lossy(), mod_name)
                     };
@@ -840,9 +845,9 @@ impl CouplingRule {
                         if item_mod.content.is_some() {
                             let mod_name = item_mod.ident.to_string();
                             let _inline_mod_path_str = if base_module_path_str == "crate" {
-                                format!("crate::{}", mod_name)
+                                format!("crate::{mod_name}")
                             } else {
-                                format!("{}::{}", base_module_path_str, mod_name)
+                                format!("{base_module_path_str}::{mod_name}")
                             };
                         }
                     }

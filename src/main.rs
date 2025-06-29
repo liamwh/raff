@@ -58,7 +58,7 @@ fn main() -> Result<()> {
 
     if let Err(e) = run_result {
         // Using color-eyre's report format
-        eprintln!("{:?}", e);
+        eprintln!("{e:?}");
         exit(1);
     }
 

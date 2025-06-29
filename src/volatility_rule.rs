@@ -272,8 +272,7 @@ impl VolatilityRule {
             println!("- Total LoC: Total non-blank lines of Rust code in the crate (used for normalization).");
         }
         println!(
-            "- Raw Score: Calculated as 'Touches + (alpha * (Added + Deleted))'. Alpha = {:.4}. A higher score indicates more recent change activity (commits and/or lines changed).",
-            alpha
+            "- Raw Score: Calculated as 'Touches + (alpha * (Added + Deleted))'. Alpha = {alpha:.4}. A higher score indicates more recent change activity (commits and/or lines changed)."
         );
         if normalize {
             println!(
@@ -350,7 +349,7 @@ impl VolatilityRule {
                 row_cells.push(Cell::new(
                     &stats
                         .normalized_score
-                        .map_or_else(|| "N/A".to_string(), |ns| format!("{:.2}", ns)),
+                        .map_or_else(|| "N/A".to_string(), |ns| format!("{ns:.2}")),
                 ));
             }
             table.add_row(Row::new(row_cells));
@@ -521,7 +520,7 @@ impl VolatilityRule {
                                 td { (stats.total_loc.map_or_else(|| "N/A".to_string(), |loc| loc.to_string())) }
                                 td style=({raw_score_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(stats.raw_score, r))}) { (format!("{:.2}", stats.raw_score)) }
                                 td style=({norm_score_ranges.as_ref().map_or_else(String::new, |r| stats.normalized_score.map_or_else(String::new, |ns_val| html_utils::get_metric_cell_style(ns_val,r)))})
-                                   { (stats.normalized_score.map_or_else(|| "N/A".to_string(), |ns| format!("{:.2}", ns))) }
+                                   { (stats.normalized_score.map_or_else(|| "N/A".to_string(), |ns| format!("{ns:.2}"))) }
                             } @else {
                                 td style=({raw_score_ranges.as_ref().map_or_else(String::new, |r| html_utils::get_metric_cell_style(stats.raw_score, r))}) { (format!("{:.2}", stats.raw_score)) }
                             }
@@ -630,7 +629,7 @@ impl VolatilityRule {
                         }
 
                         let csv_string = String::from_utf8(wtr.into_inner()?)?;
-                        println!("{}", csv_string);
+                        println!("{csv_string}");
                     }
                     _ => unreachable!(), // Should not happen given the parent match arm
                 }
@@ -642,7 +641,7 @@ impl VolatilityRule {
                     &format!("Volatility Report: {}", data.analysis_path.display()),
                     html_body,
                 );
-                println!("{}", full_html);
+                println!("{full_html}");
             }
         }
 

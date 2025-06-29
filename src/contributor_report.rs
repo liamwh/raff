@@ -4,7 +4,7 @@ use std::io::Write;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use git2::{Commit, Oid, Repository, Revwalk};
+use git2::{Commit, Repository};
 use maud::{html, Markup};
 use prettytable::{row, Table};
 use serde::Serialize;
@@ -39,6 +39,12 @@ impl ContributorStats {
 
 pub struct ContributorReportRule;
 
+impl Default for ContributorReportRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ContributorReportRule {
     pub fn new() -> Self {
         Self
@@ -58,7 +64,7 @@ impl ContributorReportRule {
             let commit = repo.find_commit(oid)?;
             let author = commit.author().name().unwrap_or("Unknown").to_string();
 
-            let mut contributor = stats
+            let contributor = stats
                 .entry(author.clone())
                 .or_insert_with(|| ContributorStats::new(author));
 
@@ -141,13 +147,13 @@ impl ContributorReportRule {
 
     fn print_json(&self, stats: &[ContributorStats]) -> Result<()> {
         let json = serde_json::to_string_pretty(stats)?;
-        println!("{}", json);
+        println!("{json}");
         Ok(())
     }
 
     fn print_yaml(&self, stats: &[ContributorStats]) -> Result<()> {
         let yaml = serde_yaml::to_string(stats)?;
-        println!("{}", yaml);
+        println!("{yaml}");
         Ok(())
     }
 

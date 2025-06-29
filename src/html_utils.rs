@@ -82,7 +82,7 @@ pub fn get_cell_style(
     // badness_factor 0.5 (warn) -> hue 60 (yellow)
     // badness_factor 1.0 (bad)  -> hue 0 (red)
     let hue = 120.0 * (1.0 - badness_factor);
-    format!("background-color: hsl({}, 100%, 80%);", hue)
+    format!("background-color: hsl({hue}, 100%, 80%);")
 }
 
 /// Simplified get_metric_cell_style that uses MetricRanges
@@ -100,14 +100,11 @@ pub fn get_metric_cell_style(value: f64, ranges: &MetricRanges) -> String {
     };
 
     // Clamp normalized_value to ensure it's between 0 and 1
-    let clamped_value = normalized_value.max(0.0).min(1.0);
+    let clamped_value = normalized_value.clamp(0.0, 1.0);
 
     // Hue: 0 for Red (worst), 120 for Green (best)
     let hue = 120.0 * (1.0 - clamped_value);
-    format!(
-        "background-color: hsl({}, 100%, 88%); text-align: right;",
-        hue
-    )
+    format!("background-color: hsl({hue}, 100%, 88%); text-align: right;")
 }
 
 /// Defines min/max ranges for a metric, to be used for color scaling.

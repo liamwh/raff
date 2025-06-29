@@ -44,7 +44,7 @@ pub fn print_report(
         }
         table.add_row(Row::new(vec![
             Cell::new(component),
-            Cell::new(&format!("{} %", percent)),
+            Cell::new(&format!("{percent} %")),
             Cell::new(&stmts.to_string()),
             Cell::new(&files.to_string()),
         ]));

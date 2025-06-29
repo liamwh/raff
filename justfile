@@ -30,7 +30,8 @@ fix: fmt && check
 
 # Check for linting errors
 check:
-    cargo clippy -- -D warnings
+    cargo clippy --workspace -- -D warnings --no-deps
+
 
 alias test := nextest
 alias t := nextest

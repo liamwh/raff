@@ -147,6 +147,12 @@ pub struct RustCodeAnalysisData {
     pub analysis_path: PathBuf,
 }
 
+impl Default for RustCodeAnalysisRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RustCodeAnalysisRule {
     pub fn new() -> Self {
         Self
@@ -168,11 +174,11 @@ impl RustCodeAnalysisRule {
             }
             RustCodeAnalysisOutputFormat::Json => {
                 let json_output = serde_json::to_string_pretty(&data.analysis_results)?;
-                println!("{}", json_output);
+                println!("{json_output}");
             }
             RustCodeAnalysisOutputFormat::Yaml => {
                 let yaml_output = serde_yaml::to_string(&data.analysis_results)?;
-                println!("{}", yaml_output);
+                println!("{yaml_output}");
             }
             RustCodeAnalysisOutputFormat::Html => {
                 let body = self.render_rust_code_analysis_html_body(
@@ -184,7 +190,7 @@ impl RustCodeAnalysisRule {
                     data.analysis_path.display()
                 );
                 let full_html = html_utils::render_html_doc(&title, body);
-                println!("{}", full_html);
+                println!("{full_html}");
             }
         }
 
@@ -309,7 +315,7 @@ impl RustCodeAnalysisRule {
         analysis_results: &[AnalysisUnit],
         project_root: &Path,
     ) -> Result<maud::Markup> {
-        let title = format!("Rust Code Analysis Report: {}", project_root.display());
+        let _title = format!("Rust Code Analysis Report: {}", project_root.display());
 
         let explanations_data = [
             (
@@ -593,7 +599,7 @@ fn print_analysis_table(analysis_results: &[AnalysisUnit], project_root: &Path) 
             Cell::new(&format!("{:.0}", aggregated_metrics.cloc)),
             Cell::new(&format!("{:.0}", aggregated_metrics.blank)),
             Cell::new(&format!("{:.0}", aggregated_metrics.cyclomatic_sum)),
-            Cell::new(&format!("{:.1}", cyclomatic_avg)),
+            Cell::new(&format!("{cyclomatic_avg:.1}")),
             Cell::new(&format!("{:.0}", aggregated_metrics.halstead_length)),
             Cell::new(&format!("{:.0}", aggregated_metrics.halstead_vocabulary)),
             Cell::new(&format!("{:.1}", aggregated_metrics.halstead_volume)),

@@ -73,16 +73,16 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         AllOutputFormat::Json => {
             let mut errors = Vec::new();
             if let Some(Err(e)) = &all_data.statement_count {
-                errors.push(format!("Statement Count Error: {}", e));
+                errors.push(format!("Statement Count Error: {e}"));
             }
             if let Some(Err(e)) = &all_data.volatility {
-                errors.push(format!("Volatility Error: {}", e));
+                errors.push(format!("Volatility Error: {e}"));
             }
             if let Some(Err(e)) = &all_data.coupling {
-                errors.push(format!("Coupling Error: {}", e));
+                errors.push(format!("Coupling Error: {e}"));
             }
             if let Some(Err(e)) = &all_data.rust_code_analysis {
-                errors.push(format!("Rust Code Analysis Error: {}", e));
+                errors.push(format!("Rust Code Analysis Error: {e}"));
             }
 
             let json_report = JsonReportData {
@@ -100,7 +100,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
             };
 
             let json = serde_json::to_string_pretty(&json_report)?;
-            println!("{}", json);
+            println!("{json}");
         }
         AllOutputFormat::Html => {
             let mut html_body_parts: Vec<Markup> = vec![];
@@ -135,7 +135,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
                 "Consolidated Analysis Report",
                 maud::html! { @for part in &html_body_parts { (part) } },
             );
-            println!("{}", full_html);
+            println!("{full_html}");
         }
     }
 
