@@ -55,6 +55,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2025-12-07
+
+### Features
+
+- Add contributor report ([`f4fdb10`](f4fdb103a78f6fea63548e0da52b2ed139f60051))
+- Add examples ([`57710e4`](57710e4e65decab643d30035dc11e704ad18a7c1))
+- Add end-to-end testing script for project validation ([`63b9efc`](63b9efc00a1bb265429c20304f97c61145fae057))
+
+### Miscellaneous Tasks
+
+- Improve linting ([`2660c80`](2660c802a99d003dae49ee070d1fdea744dfc55f))
+
+
+
 ## [0.1.0](https://github.com/liamwh/raff/releases/tag/v0.1.0) - 2025-06-13
 
 ### Added
