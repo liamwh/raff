@@ -367,6 +367,12 @@ impl Mergeable for crate::config::CouplingConfig {
 
 impl Mergeable for crate::config::RustCodeAnalysisConfig {
     fn merge(&self, other: &Self) -> Self {
+        // If both configs are identical, return self (idempotence)
+        if self == other {
+            return self.clone();
+        }
+
+        // Otherwise, merge extra_flags by concatenating
         let mut extra_flags = self.extra_flags.clone();
         extra_flags.extend(other.extra_flags.clone());
 

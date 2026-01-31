@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2e933b12ed6935f8cb2aa3c8d18422cbfda299a681e7f114e51e5266f1566c77 # shrinks to config = RaffConfig { general: GeneralConfig { path: None, verbose: false }, statement_count: StatementCountConfig { path: None, threshold: 0, output: None }, volatility: VolatilityConfig { path: None, alpha: 0.0, since: None, normalize: false, skip_merges: false, output: None }, coupling: CouplingConfig { path: None, output: None, granularity: None }, rust_code_analysis: RustCodeAnalysisConfig { path: None, extra_flags: ["0"], jobs: None, output: None, metrics: false, language: "a" }, contributor_report: ContributorReportConfig { path: None, since: None, decay: 0.0, output: None } }
