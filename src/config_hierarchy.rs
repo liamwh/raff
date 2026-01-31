@@ -196,8 +196,15 @@ pub fn find_git_repo_root() -> Result<Option<PathBuf>> {
 
     match git2::Repository::discover(&cwd) {
         Ok(repo) => Ok(repo.workdir().map(PathBuf::from)),
-        Err(e) if e.class() == git2::ErrorClass::Config => Ok(None),
-        Err(_e) => Err(RaffError::git_error_with_repo("find repository root", cwd)),
+        Err(e) => {
+            // Return Ok(None) for expected "not in a git repo" errors
+            // This includes both Config errors and generic "not found" errors
+            if e.class() == git2::ErrorClass::Config || e.code() == git2::ErrorCode::NotFound {
+                Ok(None)
+            } else {
+                Err(RaffError::git_error_with_repo("find repository root", cwd))
+            }
+        }
     }
 }
 
