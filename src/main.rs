@@ -3,8 +3,8 @@
 use anyhow::Result;
 use clap::Parser;
 use raff_core::{
-    all_rules, Cli, Commands, ContributorReportRule, CouplingRule, RustCodeAnalysisRule,
-    StatementCountRule, VolatilityRule,
+    all_rules, load_config, Cli, Commands, ContributorReportRule, CouplingRule,
+    RustCodeAnalysisRule, StatementCountRule, VolatilityRule,
 };
 use std::process::exit;
 
@@ -23,6 +23,12 @@ fn main() -> Result<()> {
 
     let cli_args = Cli::parse();
     tracing::debug!("Parsed CLI arguments: {:?}", cli_args);
+
+    // Load configuration file if specified or discover from default locations
+    let config_result = load_config(cli_args.config.as_deref())?;
+    if let Some((config_path, _config)) = &config_result {
+        tracing::info!("Loaded configuration from: {}", config_path.display());
+    }
 
     let run_result = match cli_args.command {
         Commands::StatementCount(args) => {

@@ -4,7 +4,7 @@ use git2::{DiffOptions, Repository, Sort, TreeWalkMode, TreeWalkResult};
 use maud::{html, Markup};
 use prettytable::{format, Cell, Row, Table}; // Added for table output
 use serde::{Deserialize, Serialize}; // Added for custom output struct
-                      // Ensure serde_json is explicitly imported
+                                     // Ensure serde_json is explicitly imported
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader}; // For reading files line by line in LoC calculation
@@ -836,10 +836,7 @@ mod tests {
 
     /// Helper to initialize git repository in a directory
     fn init_git_repo(dir: &PathBuf) -> Result<()> {
-        let output = Command::new("git")
-            .arg("init")
-            .current_dir(dir)
-            .output()?;
+        let output = Command::new("git").arg("init").current_dir(dir).output()?;
         if !output.status.success() {
             return Err(anyhow::anyhow!("Failed to init git repo: {:?}", output));
         }
@@ -957,18 +954,12 @@ fn main() {
             stats.commit_touch_count, 0,
             "commit_touch_count should be 0 by default"
         );
-        assert_eq!(
-            stats.lines_added, 0,
-            "lines_added should be 0 by default"
-        );
+        assert_eq!(stats.lines_added, 0, "lines_added should be 0 by default");
         assert_eq!(
             stats.lines_deleted, 0,
             "lines_deleted should be 0 by default"
         );
-        assert_eq!(
-            stats.raw_score, 0.0,
-            "raw_score should be 0.0 by default"
-        );
+        assert_eq!(stats.raw_score, 0.0, "raw_score should be 0.0 by default");
         assert!(
             stats.total_loc.is_none(),
             "total_loc should be None by default"
@@ -985,12 +976,14 @@ fn main() {
 
     #[test]
     fn test_crate_stats_clone_creates_independent_copy() {
-        let mut stats = CrateStats::default();
-        stats.root_path = PathBuf::from("test/path");
-        stats.commit_touch_count = 5;
-        stats.lines_added = 100;
-        stats.lines_deleted = 50;
-        stats.raw_score = 75.0;
+        let mut stats = CrateStats {
+            root_path: PathBuf::from("test/path"),
+            commit_touch_count: 5,
+            lines_added: 100,
+            lines_deleted: 50,
+            raw_score: 75.0,
+            ..Default::default()
+        };
 
         let cloned = stats.clone();
 
@@ -1105,7 +1098,8 @@ fn main() {
         );
 
         // Test exact match
-        let result = rule.find_owning_crate(&PathBuf::from("crates/a/src/main.rs"), &crate_stats_map);
+        let result =
+            rule.find_owning_crate(&PathBuf::from("crates/a/src/main.rs"), &crate_stats_map);
         assert!(
             result.is_some(),
             "should find owning crate for file in crate-a"
@@ -1140,10 +1134,7 @@ fn main() {
         // Test that nested crate wins over root crate
         let result =
             rule.find_owning_crate(&PathBuf::from("crates/nested/src/lib.rs"), &crate_stats_map);
-        assert!(
-            result.is_some(),
-            "should find owning crate for nested file"
-        );
+        assert!(result.is_some(), "should find owning crate for nested file");
         let (name, path) = result.unwrap();
         assert_eq!(name, "nested-crate");
         assert_eq!(path, PathBuf::from("crates/nested"));
@@ -1317,8 +1308,8 @@ fn main() {
 
     #[test]
     fn test_discover_crates_finds_single_crate() {
-        let temp_dir = create_test_repo_with_crates()
-            .expect("Failed to create test repo with crates");
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
 
         let rule = VolatilityRule::new();
         let result = rule.discover_crates_and_init_stats(temp_dir.path());
@@ -1340,7 +1331,10 @@ fn main() {
             PathBuf::from(""),
             "root_path should be repo root for this crate"
         );
-        assert_eq!(stats.commit_touch_count, 0, "initial touch count should be 0");
+        assert_eq!(
+            stats.commit_touch_count, 0,
+            "initial touch count should be 0"
+        );
         assert_eq!(stats.lines_added, 0, "initial lines_added should be 0");
         assert_eq!(stats.lines_deleted, 0, "initial lines_deleted should be 0");
     }
@@ -1369,8 +1363,8 @@ fn main() {
 
     #[test]
     fn test_analyze_with_valid_git_repository() {
-        let temp_dir = create_test_repo_with_crates()
-            .expect("Failed to create test repo with crates");
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
 
         let rule = VolatilityRule::new();
         let args = create_test_args(temp_dir.path().to_path_buf());
@@ -1417,7 +1411,10 @@ edition = "2021"
 
         let result = rule.analyze(&args);
 
-        assert!(result.is_err(), "analyze should fail with non-git repository");
+        assert!(
+            result.is_err(),
+            "analyze should fail with non-git repository"
+        );
         let error_msg = result.unwrap_err().to_string();
         assert!(
             error_msg.contains("Git repository") || error_msg.contains("git"),
@@ -1427,8 +1424,8 @@ edition = "2021"
 
     #[test]
     fn test_analyze_with_normalize_enabled_calculates_loc() {
-        let temp_dir = create_test_repo_with_crates()
-            .expect("Failed to create test repo with crates");
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
 
         let rule = VolatilityRule::new();
         let mut args = create_test_args(temp_dir.path().to_path_buf());
@@ -1436,10 +1433,7 @@ edition = "2021"
 
         let result = rule.analyze(&args);
 
-        assert!(
-            result.is_ok(),
-            "analyze should succeed with normalize=true"
-        );
+        assert!(result.is_ok(), "analyze should succeed with normalize=true");
 
         let data = result.unwrap();
         assert!(data.normalize, "normalize should be true in result");
@@ -1458,8 +1452,8 @@ edition = "2021"
 
     #[test]
     fn test_analyze_calculates_raw_score_correctly() {
-        let temp_dir = create_test_repo_with_crates()
-            .expect("Failed to create test repo with crates");
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
 
         let rule = VolatilityRule::new();
         let mut args = create_test_args(temp_dir.path().to_path_buf());
@@ -1487,8 +1481,8 @@ edition = "2021"
 
     #[test]
     fn test_run_with_table_output_succeeds() {
-        let temp_dir = create_test_repo_with_crates()
-            .expect("Failed to create test repo with crates");
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
 
         let rule = VolatilityRule::new();
         let mut args = create_test_args(temp_dir.path().to_path_buf());
@@ -1504,8 +1498,8 @@ edition = "2021"
 
     #[test]
     fn test_run_with_html_output_succeeds() {
-        let temp_dir = create_test_repo_with_crates()
-            .expect("Failed to create test repo with crates");
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
 
         let rule = VolatilityRule::new();
         let mut args = create_test_args(temp_dir.path().to_path_buf());
@@ -1521,8 +1515,8 @@ edition = "2021"
 
     #[test]
     fn test_run_with_json_output_succeeds() {
-        let temp_dir = create_test_repo_with_crates()
-            .expect("Failed to create test repo with crates");
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
 
         let rule = VolatilityRule::new();
         let mut args = create_test_args(temp_dir.path().to_path_buf());
@@ -1538,8 +1532,8 @@ edition = "2021"
 
     #[test]
     fn test_run_with_yaml_output_succeeds() {
-        let temp_dir = create_test_repo_with_crates()
-            .expect("Failed to create test repo with crates");
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
 
         let rule = VolatilityRule::new();
         let mut args = create_test_args(temp_dir.path().to_path_buf());
@@ -1555,8 +1549,8 @@ edition = "2021"
 
     #[test]
     fn test_run_with_csv_output_succeeds() {
-        let temp_dir = create_test_repo_with_crates()
-            .expect("Failed to create test repo with crates");
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
 
         let rule = VolatilityRule::new();
         let mut args = create_test_args(temp_dir.path().to_path_buf());
@@ -1586,8 +1580,8 @@ edition = "2021"
         };
 
         // Should serialize correctly
-        let json = serde_json::to_string(&stats)
-            .expect("CrateStats with None fields should serialize");
+        let json =
+            serde_json::to_string(&stats).expect("CrateStats with None fields should serialize");
         assert!(json.contains("test"), "JSON should contain path");
         assert!(json.contains("0"), "JSON should contain zero values");
     }

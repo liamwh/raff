@@ -12,6 +12,11 @@ use serde::Serialize;
     long_about = "rust-ff provides various rules to analyze Rust codebases, such as statement counting and volatility analysis. Use subcommands to select a rule."
 )]
 pub struct Cli {
+    /// Path to a configuration file (Raff.toml, .raff.toml, or custom path).
+    /// If not specified, searches for default config files in current and parent directories.
+    #[clap(long, global = true)]
+    pub config: Option<std::path::PathBuf>,
+
     #[command(subcommand)]
     pub command: Commands,
 }
