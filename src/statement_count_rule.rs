@@ -216,3 +216,408 @@ impl StatementCountRule {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::{StatementCountArgs, StatementCountOutputFormat};
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    /// Helper function to create a test directory with Rust files
+    fn create_test_directory() -> TempDir {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        // Create a simple main.rs file
+        let main_rs = r#"
+fn main() {
+    let x = 5;
+    let y = 10;
+    println!("Hello, world!");
+}
+"#;
+        fs::write(src_dir.join("main.rs"), main_rs).expect("Failed to write main.rs");
+
+        // Create a lib.rs file
+        let lib_rs = r#"
+pub fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+pub fn multiply(a: i32, b: i32) -> i32 {
+    a * b
+}
+"#;
+        fs::write(src_dir.join("lib.rs"), lib_rs).expect("Failed to write lib.rs");
+
+        temp_dir
+    }
+
+    /// Helper function to create test directory with separate top-level components
+    fn create_multi_component_test_directory() -> TempDir {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+
+        // Create component_a directory at top level
+        let comp_a_dir = temp_dir.path().join("component_a");
+        fs::create_dir_all(&comp_a_dir).expect("Failed to create component_a directory");
+
+        let comp_a = r#"
+pub fn func_a() {
+    let x = 1;
+    let y = 2;
+}
+"#;
+        fs::write(comp_a_dir.join("mod.rs"), comp_a).expect("Failed to write component_a/mod.rs");
+
+        // Create component_b directory at top level
+        let comp_b_dir = temp_dir.path().join("component_b");
+        fs::create_dir_all(&comp_b_dir).expect("Failed to create component_b directory");
+
+        let comp_b = r#"
+pub fn func_b() {
+    let a = 10;
+    let b = 20;
+    let c = 30;
+    let d = 40;
+}
+"#;
+        fs::write(comp_b_dir.join("mod.rs"), comp_b).expect("Failed to write component_b/mod.rs");
+
+        temp_dir
+    }
+
+    /// Helper function to create test args
+    fn create_test_args(path: PathBuf) -> StatementCountArgs {
+        StatementCountArgs {
+            path,
+            threshold: 10,
+            output: StatementCountOutputFormat::Table,
+        }
+    }
+
+    #[test]
+    fn test_statement_count_rule_new_creates_instance() {
+        let rule = StatementCountRule::new();
+        // Just verify the rule can be created; struct has no fields to check
+        let _ = rule;
+    }
+
+    #[test]
+    fn test_statement_count_rule_default_creates_instance() {
+        let rule = StatementCountRule::default();
+        // Just verify the rule can be created; struct has no fields to check
+        let _ = rule;
+    }
+
+    #[test]
+    fn test_analyze_valid_directory_with_rust_files() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        let result = rule.analyze(&args);
+
+        assert!(
+            result.is_ok(),
+            "analyze should succeed with valid directory containing Rust files"
+        );
+
+        let data = result.unwrap();
+        assert_eq!(data.threshold, 10, "threshold should match args");
+        assert_eq!(
+            data.analysis_path,
+            temp_dir.path(),
+            "analysis_path should match input path"
+        );
+        assert!(
+            data.grand_total > 0,
+            "grand_total should be greater than 0 for Rust files with statements"
+        );
+        assert!(
+            !data.component_stats.is_empty(),
+            "component_stats should not be empty"
+        );
+    }
+
+    #[test]
+    fn test_analyze_fails_with_nonexistent_path() {
+        let rule = StatementCountRule::new();
+        let fake_path = PathBuf::from("/nonexistent/path/that/does/not/exist");
+        let args = create_test_args(fake_path);
+
+        let result = rule.analyze(&args);
+
+        assert!(result.is_err(), "analyze should fail with nonexistent path");
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("Path not found"),
+            "error message should mention path not found"
+        );
+    }
+
+    #[test]
+    fn test_analyze_fails_with_file_instead_of_directory() {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let file_path = temp_dir.path().join("not_a_directory.txt");
+        fs::write(&file_path, "test content").expect("Failed to write test file");
+
+        let rule = StatementCountRule::new();
+        let args = create_test_args(file_path);
+
+        let result = rule.analyze(&args);
+
+        assert!(
+            result.is_err(),
+            "analyze should fail when path is a file, not a directory"
+        );
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("not a directory"),
+            "error message should mention not a directory"
+        );
+    }
+
+    #[test]
+    fn test_analyze_fails_with_directory_containing_no_rust_files() {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        // Create directory but no .rs files
+        let empty_dir = temp_dir.path().join("empty");
+        fs::create_dir_all(&empty_dir).expect("Failed to create empty directory");
+
+        let rule = StatementCountRule::new();
+        let args = create_test_args(empty_dir);
+
+        let result = rule.analyze(&args);
+
+        assert!(
+            result.is_err(),
+            "analyze should fail when directory contains no .rs files"
+        );
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("No `.rs` files found"),
+            "error message should mention no .rs files found"
+        );
+    }
+
+    #[test]
+    fn test_analyze_counts_statements_correctly() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        let result = rule.analyze(&args);
+
+        assert!(result.is_ok(), "analyze should succeed");
+        let data = result.unwrap();
+
+        // main.rs has 3 statements (2 lets + println)
+        // lib.rs has 2 statements (2 returns)
+        // Total should be 5
+        assert_eq!(
+            data.grand_total, 5,
+            "grand_total should correctly count all statements"
+        );
+    }
+
+    #[test]
+    fn test_analyze_aggregates_by_component() {
+        let temp_dir = create_multi_component_test_directory();
+        let rule = StatementCountRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        let result = rule.analyze(&args);
+
+        assert!(result.is_ok(), "analyze should succeed");
+        let data = result.unwrap();
+
+        // Should have component_a and component_b as separate components
+        // Files are at: component_a/mod.rs and component_b/mod.rs
+        // relative_namespace(component_a/mod.rs, temp_dir) = "component_a"
+        // top_level_component("component_a") = "component_a"
+        assert!(
+            data.component_stats.contains_key("component_a"),
+            "component_stats should contain component_a"
+        );
+        assert!(
+            data.component_stats.contains_key("component_b"),
+            "component_stats should contain component_b"
+        );
+
+        // component_a has 2 statements
+        let (file_count_a, stmt_count_a) = data.component_stats.get("component_a").unwrap();
+        assert_eq!(*file_count_a, 1, "component_a should have 1 file");
+        assert_eq!(*stmt_count_a, 2, "component_a should have 2 statements");
+
+        // component_b has 4 statements
+        let (file_count_b, stmt_count_b) = data.component_stats.get("component_b").unwrap();
+        assert_eq!(*file_count_b, 1, "component_b should have 1 file");
+        assert_eq!(*stmt_count_b, 4, "component_b should have 4 statements");
+    }
+
+    #[test]
+    fn test_analyze_preserves_threshold_from_args() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.threshold = 25;
+
+        let result = rule.analyze(&args);
+
+        assert!(result.is_ok(), "analyze should succeed");
+        let data = result.unwrap();
+        assert_eq!(
+            data.threshold, 25,
+            "threshold in result data should match args.threshold"
+        );
+    }
+
+    #[test]
+    fn test_render_statement_count_html_body_succeeds() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        let data = rule.analyze(&args).expect("analyze should succeed");
+
+        let result = rule.render_statement_count_html_body(&data);
+
+        assert!(
+            result.is_ok(),
+            "render_statement_count_html_body should succeed with valid data"
+        );
+
+        let markup = result.unwrap();
+        let html_string = markup.into_string();
+        assert!(!html_string.is_empty(), "rendered HTML should not be empty");
+        assert!(
+            html_string.contains("table"),
+            "rendered HTML should contain a table element"
+        );
+    }
+
+    #[test]
+    fn test_render_statement_count_html_contains_threshold() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        let data = rule.analyze(&args).expect("analyze should succeed");
+
+        let markup = rule
+            .render_statement_count_html_body(&data)
+            .expect("render should succeed");
+        let html_string = markup.into_string();
+
+        assert!(
+            html_string.contains("10%"),
+            "rendered HTML should contain the threshold value"
+        );
+    }
+
+    #[test]
+    fn test_render_statement_count_html_contains_grand_total() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        let data = rule.analyze(&args).expect("analyze should succeed");
+
+        let markup = rule
+            .render_statement_count_html_body(&data)
+            .expect("render should succeed");
+        let html_string = markup.into_string();
+
+        assert!(
+            html_string.contains("Grand Total Statements"),
+            "rendered HTML should contain grand total label"
+        );
+        assert!(
+            html_string.contains(&data.grand_total.to_string()),
+            "rendered HTML should contain grand total value"
+        );
+    }
+
+    #[test]
+    fn test_run_with_table_output_succeeds_when_within_threshold() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.output = StatementCountOutputFormat::Table;
+        args.threshold = 100; // High threshold to ensure success
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_ok(),
+            "run should succeed when components are within threshold"
+        );
+    }
+
+    #[test]
+    fn test_run_with_html_output_succeeds_when_within_threshold() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.output = StatementCountOutputFormat::Html;
+        args.threshold = 100; // High threshold to ensure success
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_ok(),
+            "run with HTML output should succeed when components are within threshold"
+        );
+    }
+
+    #[test]
+    fn test_run_fails_with_low_threshold() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.output = StatementCountOutputFormat::Table;
+        args.threshold = 1; // Very low threshold to trigger failure
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_err(),
+            "run should fail when at least one component exceeds threshold"
+        );
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("exceeds") && error_msg.contains("%"),
+            "error message should mention exceeding threshold percentage"
+        );
+    }
+
+    #[test]
+    fn test_statement_count_data_is_serializable() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        let data = rule.analyze(&args).expect("analyze should succeed");
+
+        // Test that StatementCountData can be serialized to JSON
+        let json = serde_json::to_string(&data);
+        assert!(
+            json.is_ok(),
+            "StatementCountData should be serializable to JSON"
+        );
+
+        let json_str = json.unwrap();
+        assert!(
+            json_str.contains("grand_total"),
+            "JSON should contain grand_total field"
+        );
+        assert!(
+            json_str.contains("threshold"),
+            "JSON should contain threshold field"
+        );
+    }
+}
