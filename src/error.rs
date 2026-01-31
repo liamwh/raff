@@ -81,8 +81,8 @@ impl RaffError {
     ///
     /// # Examples
     /// ```
-    /// use raff::error::RaffError;
-    ///
+    /// # use raff_core::error::RaffError;
+    /// #
     /// let err = RaffError::parse_error("Failed to parse Rust file");
     /// ```
     pub fn parse_error(context: impl Into<String>) -> Self {
@@ -405,6 +405,16 @@ impl From<csv::Error> for RaffError {
         Self::AnalysisError {
             rule: "csv_output".to_string(),
             message: format!("Failed to write CSV: {}", err),
+            source: Some(Box::new(err)),
+        }
+    }
+}
+
+impl From<serde_yaml::Error> for RaffError {
+    fn from(err: serde_yaml::Error) -> Self {
+        Self::ConfigError {
+            message: format!("Failed to parse/serialize YAML: {}", err),
+            path: None,
             source: Some(Box::new(err)),
         }
     }

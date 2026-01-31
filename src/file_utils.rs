@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::error::Result;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -13,8 +13,7 @@ use walkdir::WalkDir;
 /// - `Err` if directory traversal fails.
 pub fn collect_all_rs(dir: &Path, out_files: &mut Vec<PathBuf>) -> Result<()> {
     for entry_result in WalkDir::new(dir).into_iter() {
-        let entry = entry_result
-            .with_context(|| format!("Error walking directory entry in '{}'", dir.display()))?;
+        let entry = entry_result?;
         if entry.file_type().is_file() {
             if let Some(ext) = entry.path().extension() {
                 if ext == "rs" {
