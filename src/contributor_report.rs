@@ -28,8 +28,9 @@
 //! # Usage
 //!
 //! ```no_run
-//! use raff::contributor_report::{ContributorReportRule, ContributorReportArgs};
-//! use raff::cli::ContributorReportOutputFormat;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use raff_core::contributor_report::ContributorReportRule;
+//! use raff_core::{ContributorReportArgs, ContributorReportOutputFormat};
 //! use std::path::PathBuf;
 //!
 //! let rule = ContributorReportRule::new();
@@ -43,6 +44,8 @@
 //! if let Err(e) = rule.run(&args) {
 //!     eprintln!("Error: {}", e);
 //! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Data Structures

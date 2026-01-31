@@ -21,8 +21,9 @@
 //! # Usage
 //!
 //! ```no_run
-//! use raff::rust_code_analysis_rule::{RustCodeAnalysisRule, RustCodeAnalysisArgs};
-//! use raff::cli::RustCodeAnalysisOutputFormat;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use raff_core::rust_code_analysis_rule::RustCodeAnalysisRule;
+//! use raff_core::{RustCodeAnalysisArgs, RustCodeAnalysisOutputFormat};
 //! use std::path::PathBuf;
 //!
 //! let rule = RustCodeAnalysisRule::new();
@@ -38,6 +39,8 @@
 //! if let Err(e) = rule.run(&args) {
 //!     eprintln!("Error: {}", e);
 //! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Metrics Explained

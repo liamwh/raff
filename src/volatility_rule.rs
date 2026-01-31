@@ -29,8 +29,9 @@
 //! # Usage
 //!
 //! ```no_run
-//! use raff::volatility_rule::{VolatilityRule, VolatilityArgs};
-//! use raff::cli::VolatilityOutputFormat;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use raff_core::volatility_rule::VolatilityRule;
+//! use raff_core::{VolatilityArgs, VolatilityOutputFormat};
 //! use std::path::PathBuf;
 //!
 //! let rule = VolatilityRule::new();
@@ -46,6 +47,8 @@
 //! if let Err(e) = rule.run(&args) {
 //!     eprintln!("Error: {}", e);
 //! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Data Structures

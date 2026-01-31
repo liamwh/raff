@@ -14,8 +14,9 @@
 //! # Usage
 //!
 //! ```no_run
-//! use raff::statement_count_rule::{StatementCountRule, StatementCountArgs};
-//! use raff::cli::StatementCountOutputFormat;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use raff_core::statement_count_rule::StatementCountRule;
+//! use raff_core::{StatementCountArgs, StatementCountOutputFormat};
 //! use std::path::PathBuf;
 //!
 //! let rule = StatementCountRule::new();
@@ -28,6 +29,8 @@
 //! if let Err(e) = rule.run(&args) {
 //!     eprintln!("Error: {}", e);
 //! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Data Structures

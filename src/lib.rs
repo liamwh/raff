@@ -40,7 +40,7 @@
 //! let args = StatementCountArgs {
 //!     path: PathBuf::from("./src"),
 //!     threshold: 1000,
-//!     output: StatementCountOutputFormat::Json,
+//!     output: StatementCountOutputFormat::Table,
 //! };
 //!
 //! // Run the analysis

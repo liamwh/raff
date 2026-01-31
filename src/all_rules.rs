@@ -29,7 +29,7 @@
 //!     vol_skip_merges: false,
 //!     coup_granularity: raff_core::CouplingGranularity::Both,
 //!     rca_extra_flags: vec![],
-//!     rca_jobs: None,
+//!     rca_jobs: 4,
 //!     rca_metrics: true,
 //!     rca_language: "rust".to_string(),
 //! };

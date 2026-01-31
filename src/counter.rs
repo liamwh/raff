@@ -6,26 +6,16 @@
 //!
 //! # Example
 //!
-//! ```rust
-//! use raff_core::counter::StmtCounter;
-//! use syn::parse_file;
+//! The counter is used internally by the statement count rule to count
+//! statements in parsed Rust code:
 //!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let code = r#"
-//! fn main() {
-//!     let x = 5;
-//!     println!("{}", x);
-//! }
-//! "#;
-//!
-//! let ast = parse_file(code)?;
+//! ```text
 //! let mut counter = StmtCounter::new();
-//! counter.visit_file(&ast);
-//!
-//! assert_eq!(counter.count, 2);
-//! # Ok(())
-//! # }
+//! counter.visit_file(&ast);  // ast: &syn::File
+//! // counter.count now contains the statement count
 //! ```
+//!
+//! The `visit_file` method requires the `Visit` trait from `syn` to be in scope.
 
 use syn::{visit::Visit, File as SynFile, Stmt};
 

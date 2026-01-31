@@ -24,8 +24,9 @@
 //! # Usage
 //!
 //! ```no_run
-//! use raff::coupling_rule::{CouplingRule, CouplingArgs};
-//! use raff::cli::{CouplingGranularity, CouplingOutputFormat};
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use raff_core::coupling_rule::CouplingRule;
+//! use raff_core::{CouplingArgs, CouplingGranularity, CouplingOutputFormat};
 //! use std::path::PathBuf;
 //!
 //! let rule = CouplingRule::new();
@@ -38,6 +39,8 @@
 //! if let Err(e) = rule.run(&args) {
 //!     eprintln!("Error: {}", e);
 //! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Data Structures
