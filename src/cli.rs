@@ -17,6 +17,16 @@ pub struct Cli {
     #[clap(long, global = true)]
     pub config: Option<std::path::PathBuf>,
 
+    /// Disable caching for this run.
+    /// When set, analysis results will not be cached or retrieved from cache.
+    #[clap(long, global = true)]
+    pub no_cache: bool,
+
+    /// Clear the cache before running analysis.
+    /// When set, all existing cache entries will be removed before analysis begins.
+    #[clap(long, global = true)]
+    pub clear_cache: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }
