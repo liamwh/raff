@@ -1,3 +1,91 @@
+//! Rust Code Analysis Rule
+//!
+//! This module provides a wrapper around the `rust-code-analysis-cli` tool to perform
+//! extended code metrics analysis. It aggregates complex metrics like cyclomatic complexity,
+//! Halstead metrics, and lines of code counts for Rust files.
+//!
+//! # Overview
+//!
+//! The rule acts as a convenient wrapper around the `rust-code-analysis-cli` external tool,
+//! which provides detailed code metrics including:
+//!
+//! - **Lines of Code**: SLOC, PLOC, LLOC, CLOC, and blank lines
+//! - **Cyclomatic Complexity**: Sum and average complexity measures
+//! - **Halstead Metrics**: Length, vocabulary, volume, effort, time, and bug estimates
+//!
+//! # Prerequisites
+//!
+//! This rule requires `rust-code-analysis-cli` to be installed and available in your PATH.
+//! If the tool is not found, the analysis will fail with a clear error message.
+//!
+//! # Usage
+//!
+//! ```no_run
+//! use raff::rust_code_analysis_rule::{RustCodeAnalysisRule, RustCodeAnalysisArgs};
+//! use raff::cli::RustCodeAnalysisOutputFormat;
+//! use std::path::PathBuf;
+//!
+//! let rule = RustCodeAnalysisRule::new();
+//! let args = RustCodeAnalysisArgs {
+//!     path: PathBuf::from("."),
+//!     language: "rust".to_string(),
+//!     metrics: true,
+//!     jobs: 4,
+//!     extra_flags: vec![],
+//!     output: RustCodeAnalysisOutputFormat::Table,
+//! };
+//!
+//! if let Err(e) = rule.run(&args) {
+//!     eprintln!("Error: {}", e);
+//! }
+//! ```
+//!
+//! # Metrics Explained
+//!
+//! ## Lines of Code Metrics
+//!
+//! - **SLOC**: Source Lines of Code — non-comment, non-blank lines
+//! - **PLOC**: Physical Lines of Code — total lines including comments
+//! - **LLOC**: Logical Lines of Code — executable statements
+//! - **CLOC**: Comment Lines of Code — lines containing only comments
+//! - **Blank**: Empty lines
+//!
+//! ## Cyclomatic Complexity
+//!
+//! Measures the number of linearly independent paths through the code.
+//! - **Sum**: Total complexity across all functions
+//! - **Average**: Mean complexity per function
+//!
+//! ## Halstead Metrics
+//!
+//! - **Length**: Total number of operators and operands
+//! - **Vocabulary**: Number of unique operators and operands
+//! - **Volume**: Program size = Length × log₂(Vocabulary)
+//! - **Effort**: Estimated mental effort to develop
+//! - **Time**: Estimated time to develop/understand (seconds)
+//! - **Bugs**: Estimated number of delivered bugs
+//!
+//! # Output Formats
+//!
+//! The rule supports multiple output formats:
+//! - `Table`: Human-readable table with metric explanations
+//! - `Json`: Machine-readable JSON (passthrough from tool)
+//! - `Yaml`: Machine-readable YAML
+//! - `Html`: Interactive HTML report with color-coded metrics
+//!
+//! # File Discovery
+//!
+//! The rule automatically discovers relevant source files based on the specified language:
+//! - For Rust (`.rs` files), it walks the directory tree while ignoring `target/`, `node_modules/`, etc.
+//! - For other languages, it passes the path directly to the underlying tool
+//!
+//! # Errors
+//!
+//! This module returns [`RaffError`] in the following cases:
+//! - `rust-code-analysis-cli` is not found in PATH
+//! - The tool exits with a non-zero status
+//! - The tool produces invalid JSON output
+
 use crate::error::{RaffError, Result};
 use prettytable::{format as pt_format, Attr, Cell, Row, Table};
 use serde::{Deserialize, Serialize};

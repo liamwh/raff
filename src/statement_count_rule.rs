@@ -1,3 +1,48 @@
+//! Statement Count Rule
+//!
+//! This module provides the statement count analysis rule, which counts the number of
+//! statements in each Rust component (top-level directory under the source path) and
+//! checks whether any component exceeds a specified percentage threshold of the total
+//! statements.
+//!
+//! # Overview
+//!
+//! The statement count rule helps identify components that have grown too large relative
+//! to the overall codebase. It parses all `.rs` files using `syn`, counts AST statements
+//! using the [`StmtCounter`] visitor, and aggregates results by component.
+//!
+//! # Usage
+//!
+//! ```no_run
+//! use raff::statement_count_rule::{StatementCountRule, StatementCountArgs};
+//! use raff::cli::StatementCountOutputFormat;
+//! use std::path::PathBuf;
+//!
+//! let rule = StatementCountRule::new();
+//! let args = StatementCountArgs {
+//!     path: PathBuf::from("."),
+//!     threshold: 10,
+//!     output: StatementCountOutputFormat::Table,
+//! };
+//!
+//! if let Err(e) = rule.run(&args) {
+//!     eprintln!("Error: {}", e);
+//! }
+//! ```
+//!
+//! # Data Structures
+//!
+//! - [`StatementCountRule`]: The main rule implementation
+//! - [`StatementCountData`]: Contains the analysis results including component stats and thresholds
+//!
+//! # Errors
+//!
+//! This module returns [`RaffError`] in the following cases:
+//! - The provided path does not exist or is not a directory
+//! - No `.rs` files are found in the analysis path
+//! - No Rust statements are found in any files
+//! - An error occurs during AST parsing
+
 use maud::html;
 use maud::Markup;
 use serde::Serialize;

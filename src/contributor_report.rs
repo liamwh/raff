@@ -1,3 +1,78 @@
+//! Contributor Report Rule
+//!
+//! This module provides the contributor report rule, which analyzes Git commit history
+//! to generate ranked reports of contributor activity. The report scores contributors
+//! based on commit count, lines changed, files touched, and recency of contributions.
+//!
+//! # Overview
+//!
+//! The contributor report helps identify the most active contributors to a codebase.
+//! It uses an exponential decay factor to weight recent contributions more heavily than
+//! older ones, providing a current view of contributor engagement.
+//!
+//! # Scoring Formula
+//!
+//! Each commit contributes to a contributor's score using the formula:
+//!
+//! ```text
+//! commit_score = (1 + churn + files_touched) * e^(-decay * days_since_commit)
+//!
+//! where:
+//!   churn = lines_added + lines_deleted
+//!   decay = the decay factor (default: 0.01)
+//!   days_since_commit = number of days since the commit
+//! ```
+//!
+//! A higher decay factor causes older contributions to be weighted less heavily.
+//!
+//! # Usage
+//!
+//! ```no_run
+//! use raff::contributor_report::{ContributorReportRule, ContributorReportArgs};
+//! use raff::cli::ContributorReportOutputFormat;
+//! use std::path::PathBuf;
+//!
+//! let rule = ContributorReportRule::new();
+//! let args = ContributorReportArgs {
+//!     path: PathBuf::from("."),
+//!     since: Some("2023-01-01".to_string()),
+//!     decay: 0.01,
+//!     output: ContributorReportOutputFormat::Table,
+//! };
+//!
+//! if let Err(e) = rule.run(&args) {
+//!     eprintln!("Error: {}", e);
+//! }
+//! ```
+//!
+//! # Data Structures
+//!
+//! - [`ContributorReportRule`]: The main rule implementation
+//! - [`ContributorStats`]: Statistics for a single contributor including commits, churn, and score
+//!
+//! # Metrics Per Contributor
+//!
+//! - **Author**: The git author name
+//! - **Commit Count**: Total number of commits
+//! - **Lines Added**: Total lines of code added
+//! - **Lines Deleted**: Total lines of code deleted (considered positive contribution)
+//! - **Files Touched**: Number of unique files modified
+//! - **Score**: Weighted sum considering recency decay
+//!
+//! # Output Formats
+//!
+//! The rule supports multiple output formats:
+//! - `Table`: Human-readable table format
+//! - `Html`: Interactive HTML report saved to `contributor-report.html`
+//! - `Json`: Machine-readable JSON
+//! - `Yaml`: Machine-readable YAML
+//!
+//! # Errors
+//!
+//! This module returns [`RaffError`] in the following cases:
+//! - The provided path is not a valid Git repository
+//! - Git operations fail (e.g., corrupted repository)
+
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;

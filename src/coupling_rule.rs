@@ -1,3 +1,81 @@
+//! Code Coupling Rule
+//!
+//! This module provides the coupling analysis rule, which measures dependencies
+//! between components in a Rust codebase. It supports both crate-level and
+//! module-level coupling analysis.
+//!
+//! # Overview
+//!
+//! The coupling rule analyzes how different parts of a codebase depend on each other.
+//! It calculates:
+//!
+//! - **Ce (Efferent Coupling)**: The number of other components this component depends on
+//! - **Ca (Afferent Coupling)**: The number of other components that depend on this component
+//! - **I (Instability)**: Ce / (Ce + Ca) — ranges from 0 (stable) to 1 (unstable)
+//!
+//! # Granularity Levels
+//!
+//! The analysis can be performed at three levels:
+//!
+//! - **Crate**: Analyzes dependencies between workspace crates using `cargo metadata`
+//! - **Module**: Analyzes dependencies between Rust modules within each crate using AST analysis
+//! - **Both**: Reports both crate-level and module-level coupling
+//!
+//! # Usage
+//!
+//! ```no_run
+//! use raff::coupling_rule::{CouplingRule, CouplingArgs};
+//! use raff::cli::{CouplingGranularity, CouplingOutputFormat};
+//! use std::path::PathBuf;
+//!
+//! let rule = CouplingRule::new();
+//! let args = CouplingArgs {
+//!     path: PathBuf::from("."),
+//!     output: CouplingOutputFormat::Table,
+//!     granularity: CouplingGranularity::Both,
+//! };
+//!
+//! if let Err(e) = rule.run(&args) {
+//!     eprintln!("Error: {}", e);
+//! }
+//! ```
+//!
+//! # Data Structures
+//!
+//! - [`CouplingRule`]: The main rule implementation
+//! - [`CrateCoupling`]: Coupling data for a single crate
+//! - [`ModuleCoupling`]: Coupling data for a single module
+//! - [`CouplingData`]: Container for all coupling analysis results
+//!
+//! # Output Formats
+//!
+//! The rule supports multiple output formats:
+//! - `Table`: Human-readable table format
+//! - `Json`: Machine-readable JSON
+//! - `Yaml`: Machine-readable YAML
+//! - `Html`: Interactive HTML report with sortable tables
+//! - `Dot`: Graphviz DOT format for visualization
+//!
+//! # Crate-Level Analysis
+//!
+//! At the crate level, the rule uses `cargo metadata` to analyze the dependency graph
+//! of workspace crates. It identifies which crates depend on which other crates within
+//! the workspace.
+//!
+//! # Module-Level Analysis
+//!
+//! At the module level, the rule performs AST analysis to identify:
+//! - `use` statements and their paths
+//! - Type references in function signatures and struct fields
+//! - Expression paths that reference other modules
+//!
+//! # Errors
+//!
+//! This module returns [`RaffError`] in the following cases:
+//! - The provided path does not exist or is not a directory
+//! - `cargo metadata` fails to execute or returns invalid output
+//! - Git operations fail for repository-level analysis
+
 use crate::error::{RaffError, Result};
 use maud::{html, Markup};
 use prettytable::{Cell, Row, Table};

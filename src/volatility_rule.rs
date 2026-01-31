@@ -1,3 +1,75 @@
+//! Code Volatility Rule
+//!
+//! This module provides the volatility analysis rule, which measures how frequently
+//! and extensively each crate in a workspace has changed over time. It uses Git
+//! history to track commit touches, lines added/deleted, and calculates volatility
+//! scores that can be normalized by lines of code.
+//!
+//! # Overview
+//!
+//! The volatility rule helps identify "hot spots" in the codebase—crates that are
+//! undergoing frequent or extensive changes. This can indicate areas of active
+//! development, technical debt, or instability that may warrant attention.
+//!
+//! # Volatility Scoring
+//!
+//! The raw volatility score is calculated as:
+//! ```text
+//! raw_score = (lines_added + lines_deleted) + α * (commit_touches)
+//! ```
+//!
+//! Where α (alpha) is a weighting factor that controls the relative importance of
+//! commit frequency versus code churn.
+//!
+//! When normalization is enabled, the score is divided by the total lines of code:
+//! ```text
+//! normalized_score = raw_score / total_loc
+//! ```
+//!
+//! # Usage
+//!
+//! ```no_run
+//! use raff::volatility_rule::{VolatilityRule, VolatilityArgs};
+//! use raff::cli::VolatilityOutputFormat;
+//! use std::path::PathBuf;
+//!
+//! let rule = VolatilityRule::new();
+//! let args = VolatilityArgs {
+//!     path: PathBuf::from("."),
+//!     alpha: 0.5,
+//!     since: Some("2023-01-01".to_string()),
+//!     normalize: true,
+//!     output: VolatilityOutputFormat::Table,
+//!     skip_merges: false,
+//! };
+//!
+//! if let Err(e) = rule.run(&args) {
+//!     eprintln!("Error: {}", e);
+//! }
+//! ```
+//!
+//! # Data Structures
+//!
+//! - [`VolatilityRule`]: The main rule implementation
+//! - [`CrateStats`]: Statistics for a single crate including commit counts, churn, and scores
+//! - [`VolatilityData`]: Container for all crate statistics and analysis parameters
+//!
+//! # Output Formats
+//!
+//! The rule supports multiple output formats:
+//! - `Table`: Human-readable table with colored output
+//! - `Json`: Machine-readable JSON
+//! - `Yaml`: Machine-readable YAML
+//! - `Csv`: Spreadsheet-compatible CSV
+//! - `Html`: Interactive HTML report with sortable tables
+//!
+//! # Errors
+//!
+//! This module returns [`RaffError`] in the following cases:
+//! - The provided path is not a valid Git repository
+//! - No crates (Cargo.toml files) are found
+//! - Git operations fail (e.g., corrupted repository)
+
 use chrono::{DateTime, NaiveDate, TimeZone, Utc}; // For parsing --since date
 use git2::{DiffOptions, Repository, Sort, TreeWalkMode, TreeWalkResult};
 use maud::{html, Markup};
