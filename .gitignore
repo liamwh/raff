@@ -65,3 +65,7 @@ deployment/openshift/volumes/**/data
 **/lcov.info
 **/tempo-data
 
+
+.velor
+
+/docs/plans

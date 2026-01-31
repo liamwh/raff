@@ -29,6 +29,7 @@ struct Package {
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Hash, Clone)]
+#[allow(dead_code)]
 struct PkgId(String);
 
 #[derive(Debug, Deserialize, Clone)]
