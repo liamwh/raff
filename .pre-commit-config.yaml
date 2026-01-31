@@ -1,0 +1,31 @@
+default_stages: [pre-commit]
+fail_fast: false
+
+repos:
+  # Commit message validation (commit-msg stage)
+  - repo: local
+    hooks:
+      - id: commitlint
+        name: Lint commit message
+        entry: bunx commitlint --edit
+        language: system
+        stages: [commit-msg]
+
+  # Priority 0: Rust checks
+  - repo: local
+    hooks:
+      - id: rust-fmt-check
+        name: Check Rust formatting
+        entry: cargo +nightly fmt --all -- --check
+        language: system
+        pass_filenames: false
+        always_run: true
+        priority: 0
+
+      - id: cargo-clippy
+        name: Run cargo clippy
+        entry: cargo clippy --workspace --all-targets -- -D warnings
+        language: system
+        pass_filenames: false
+        always_run: true
+        priority: 0

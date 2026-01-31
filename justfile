@@ -95,7 +95,7 @@ install-tools:
     brew install bruno
 
     @echo "Installing dependencies for the root package.json"
-    pnpm install
+    bun install
 
     @echo "Done!"
 
@@ -106,4 +106,26 @@ clean-dev-deps:
 # Test a crate and module
 test-module package test:
     cargo nextest run --filterset "package({{package}}) & test({{test}})"
+
+# Install pre-commit hooks (prek)
+install-hooks:
+    @echo "🪝 Installing prek hooks..."
+    @prek install
+    @echo "✅ Pre-commit hooks installed!"
+
+# Uninstall pre-commit hooks
+uninstall-hooks:
+    @echo "🪝 Uninstalling prek hooks..."
+    @prek uninstall
+    @echo "✅ Pre-commit hooks uninstalled!"
+
+# Run pre-commit hooks manually on all files
+run-hooks:
+    @echo "🪝 Running pre-commit hooks manually..."
+    @prek run --all-files
+
+# Validate pre-commit config
+validate-hooks:
+    @echo "🔍 Validating pre-commit config..."
+    @prek validate-config
 

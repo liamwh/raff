@@ -3,9 +3,10 @@
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",
     "@commitlint/config-conventional": "^19.0.0",
-    "husky": "^9.1.7"
+    "@j178/prek": "^0.2.29"
   },
   "scripts": {
-    "prepare": "husky"
+    "prepare": "[ -n \"$CI\" ] || prek install",
+    "postinstall": "prek install"
   }
 }
