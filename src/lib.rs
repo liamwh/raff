@@ -5,6 +5,7 @@ pub mod config;
 pub mod contributor_report;
 pub mod counter;
 pub mod coupling_rule;
+pub mod error;
 pub mod file_utils;
 pub mod html_utils;
 pub mod reporting;
@@ -32,3 +33,6 @@ pub use crate::config::{
     load_config, load_config_from_path, ContributorReportConfig, CouplingConfig, GeneralConfig,
     RaffConfig, RustCodeAnalysisConfig, StatementCountConfig, VolatilityConfig,
 };
+
+// Error exports
+pub use crate::error::{RaffError as Error, Result};
