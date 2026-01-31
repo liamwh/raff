@@ -73,6 +73,7 @@ pub mod error;
 pub mod file_utils;
 pub mod html_utils;
 pub mod reporting;
+pub mod rule;
 pub mod rust_code_analysis_rule;
 pub mod statement_count_rule;
 pub mod table_utils;
@@ -103,3 +104,6 @@ pub use crate::cache::{CacheEntry, CacheKey, CacheManager};
 
 // Error exports
 pub use crate::error::{RaffError as Error, Result};
+
+// Rule trait exports
+pub use crate::rule::Rule;
