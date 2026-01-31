@@ -61,6 +61,7 @@ use crate::error::{RaffError, Result};
 use crate::file_utils::{collect_all_rs, relative_namespace, top_level_component}; // Assuming file_utils.rs is at crate::file_utils
 use crate::html_utils; // Now using Maud-based html_utils
 use crate::reporting::print_report; // Assuming reporting.rs is at crate::reporting // Import the new HTML utilities
+use crate::rule::Rule;
 
 /// Rule to count statements in Rust components and check against a threshold.
 #[derive(Debug, Default)]
@@ -74,12 +75,37 @@ pub struct StatementCountData {
     pub analysis_path: PathBuf,
 }
 
+impl Rule for StatementCountRule {
+    type Config = StatementCountArgs;
+    type Data = StatementCountData;
+
+    fn name() -> &'static str {
+        "statement_count"
+    }
+
+    fn description() -> &'static str {
+        "Counts statements in Rust components and checks against a threshold"
+    }
+
+    fn run(&self, config: &Self::Config) -> Result<()> {
+        self.run_impl(config)
+    }
+
+    fn analyze(&self, config: &Self::Config) -> Result<Self::Data> {
+        self.analyze_impl(config)
+    }
+}
+
 impl StatementCountRule {
     pub fn new() -> Self {
         StatementCountRule
     }
 
     pub fn run(&self, args: &StatementCountArgs) -> Result<()> {
+        self.run_impl(args)
+    }
+
+    fn run_impl(&self, args: &StatementCountArgs) -> Result<()> {
         let data = self.analyze(args)?;
 
         match args.output {
@@ -136,6 +162,10 @@ impl StatementCountRule {
     }
 
     pub fn analyze(&self, args: &StatementCountArgs) -> Result<StatementCountData> {
+        self.analyze_impl(args)
+    }
+
+    fn analyze_impl(&self, args: &StatementCountArgs) -> Result<StatementCountData> {
         let threshold = args.threshold;
         let analysis_path = &args.path;
 
@@ -711,5 +741,111 @@ pub fn func_b() {
             json_str.contains("threshold"),
             "JSON should contain threshold field"
         );
+    }
+
+    // Tests for the Rule trait implementation
+    use crate::rule::Rule;
+
+    #[test]
+    fn test_rule_name_returns_statement_count() {
+        assert_eq!(
+            StatementCountRule::name(),
+            "statement_count",
+            "Rule name should be 'statement_count'"
+        );
+    }
+
+    #[test]
+    fn test_rule_description_returns_meaningful_text() {
+        let description = StatementCountRule::description();
+        assert!(
+            !description.is_empty(),
+            "Rule description should not be empty"
+        );
+        assert!(
+            description.contains("statement") || description.contains("count"),
+            "Rule description should describe the rule's purpose"
+        );
+    }
+
+    #[test]
+    fn test_rule_trait_run_delegates_correctly() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.output = StatementCountOutputFormat::Table;
+        args.threshold = 100; // High threshold to ensure success
+
+        // Call the Rule trait's run method
+        let result = <StatementCountRule as Rule>::run(&rule, &args);
+
+        assert!(
+            result.is_ok(),
+            "Rule trait run method should succeed when components are within threshold"
+        );
+    }
+
+    #[test]
+    fn test_rule_trait_analyze_returns_correct_data_type() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        // Call the Rule trait's analyze method
+        let result = <StatementCountRule as Rule>::analyze(&rule, &args);
+
+        assert!(
+            result.is_ok(),
+            "Rule trait analyze method should succeed with valid input"
+        );
+
+        let data = result.unwrap();
+        assert_eq!(
+            data.threshold, 10,
+            "Analyzed data should have the correct threshold"
+        );
+        assert!(
+            data.grand_total > 0,
+            "Analyzed data should have positive grand_total"
+        );
+    }
+
+    #[test]
+    fn test_rule_trait_run_fails_with_low_threshold_via_trait() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.output = StatementCountOutputFormat::Table;
+        args.threshold = 1; // Very low threshold to trigger failure
+
+        // Call the Rule trait's run method
+        let result = <StatementCountRule as Rule>::run(&rule, &args);
+
+        assert!(
+            result.is_err(),
+            "Rule trait run method should fail when threshold is exceeded"
+        );
+    }
+
+    #[test]
+    fn test_rule_associated_types_match() {
+        // This test verifies that the associated types are correctly set
+        // It's a compile-time check; if it compiles, the types are correct
+        let rule = StatementCountRule::new();
+
+        // Verify Config type is StatementCountArgs
+        let config = StatementCountArgs {
+            path: PathBuf::from("."),
+            threshold: 10,
+            output: StatementCountOutputFormat::Table,
+        };
+
+        // Verify Data type is StatementCountData
+        let _config_check: <StatementCountRule as Rule>::Config = config;
+        // We can't directly check Data type without an instance, but the
+        // analyze method returning Result<StatementCountData> confirms it
+
+        // Verify run and analyze work with these types
+        let _ = rule;
     }
 }

@@ -58,7 +58,7 @@ pub enum StatementCountOutputFormat {
 }
 
 /// Arguments for the `statement-count` subcommand.
-#[derive(Args, Debug)]
+#[derive(Args, Clone, Debug)]
 pub struct StatementCountArgs {
     /// Path to the directory/project to analyze.
     #[clap(long, short, default_value = ".")]
