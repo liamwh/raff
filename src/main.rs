@@ -2,10 +2,11 @@
 
 use clap::Parser;
 use raff_core::{
-    all_rules, error::Result, load_config, merge_all_args, merge_contributor_report_args,
-    merge_coupling_args, merge_rust_code_analysis_args, merge_statement_count_args,
-    merge_volatility_args, CacheManager, Cli, Commands, ContributorReportRule, CouplingRule,
-    RustCodeAnalysisRule, StatementCountRule, VolatilityRule,
+    all_rules, error::Result, load_hierarchical_config, merge_all_args,
+    merge_contributor_report_args, merge_coupling_args, merge_rust_code_analysis_args,
+    merge_statement_count_args, merge_volatility_args, CacheManager, Cli, Commands,
+    ConfigSourceType, ContributorReportRule, CouplingRule, RustCodeAnalysisRule,
+    StatementCountRule, VolatilityRule,
 };
 use std::process::exit;
 
@@ -45,18 +46,24 @@ fn main() -> Result<()> {
         cache_manager.set_enabled(false);
     }
 
-    // Load configuration file if specified or discover from default locations
-    let config_result = load_config(cli_args.config.as_deref())?;
-    if let Some((config_path, _config)) = &config_result {
-        tracing::info!("Loaded configuration from: {}", config_path.display());
+    // Load configuration hierarchically from user, repo, and local sources
+    let hierarchical_result = load_hierarchical_config(cli_args.config.as_deref())?;
+
+    // Log all loaded configuration sources
+    for source in &hierarchical_result.sources {
+        tracing::info!(
+            "Loaded {} config from: {}",
+            match source.source_type {
+                ConfigSourceType::User => "user-level",
+                ConfigSourceType::RepoLocal => "repo-local",
+                ConfigSourceType::TraditionalLocal => "traditional local",
+                ConfigSourceType::CliExplicit => "CLI-specified",
+            },
+            source.path.display()
+        );
     }
 
-    // Get config reference (use default if none loaded)
-    let default_config = raff_core::RaffConfig::default();
-    let config = config_result
-        .as_ref()
-        .map(|(_, c)| c)
-        .unwrap_or(&default_config);
+    let config = &hierarchical_result.merged;
 
     let run_result = match cli_args.command {
         Commands::StatementCount(args) => {
