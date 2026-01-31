@@ -66,6 +66,7 @@ pub mod all_rules;
 pub mod cache;
 pub mod cli;
 pub mod config;
+pub mod config_hierarchy;
 pub mod contributor_report;
 pub mod counter;
 pub mod coupling_rule;
@@ -95,8 +96,16 @@ pub use crate::volatility_rule::VolatilityRule;
 
 // Config exports
 pub use crate::config::{
-    load_config, load_config_from_path, ContributorReportConfig, CouplingConfig, GeneralConfig,
-    RaffConfig, RustCodeAnalysisConfig, StatementCountConfig, VolatilityConfig,
+    load_config, load_config_from_path, merge_all_args, merge_contributor_report_args,
+    merge_coupling_args, merge_rust_code_analysis_args, merge_statement_count_args,
+    merge_volatility_args, ContributorReportConfig, CouplingConfig, GeneralConfig, RaffConfig,
+    RustCodeAnalysisConfig, StatementCountConfig, VolatilityConfig,
+};
+
+// Config hierarchy exports
+pub use crate::config_hierarchy::{
+    find_git_repo_root, get_repo_local_config_path, get_user_config_path, load_hierarchical_config,
+    merge_configs, ConfigSource, ConfigSourceType, HierarchicalConfig, Mergeable,
 };
 
 // Cache exports

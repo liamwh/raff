@@ -201,7 +201,7 @@ pub enum AllOutputFormat {
 }
 
 /// Arguments for the `all` subcommand.
-#[derive(Args, Debug)]
+#[derive(Args, Clone, Debug)]
 pub struct AllArgs {
     /// Path to the directory/project to analyze.
     #[clap(long, short, default_value = ".")]

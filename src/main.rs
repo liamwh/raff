@@ -2,8 +2,10 @@
 
 use clap::Parser;
 use raff_core::{
-    all_rules, error::Result, load_config, CacheManager, Cli, Commands, ContributorReportRule,
-    CouplingRule, RustCodeAnalysisRule, StatementCountRule, VolatilityRule,
+    all_rules, error::Result, load_config, merge_all_args, merge_contributor_report_args,
+    merge_coupling_args, merge_rust_code_analysis_args, merge_statement_count_args,
+    merge_volatility_args, CacheManager, Cli, Commands, ContributorReportRule, CouplingRule,
+    RustCodeAnalysisRule, StatementCountRule, VolatilityRule,
 };
 use std::process::exit;
 
@@ -49,35 +51,51 @@ fn main() -> Result<()> {
         tracing::info!("Loaded configuration from: {}", config_path.display());
     }
 
+    // Get config reference (use default if none loaded)
+    let default_config = raff_core::RaffConfig::default();
+    let config = config_result
+        .as_ref()
+        .map(|(_, c)| c)
+        .unwrap_or(&default_config);
+
     let run_result = match cli_args.command {
         Commands::StatementCount(args) => {
+            let merged_args = merge_statement_count_args(&args, config);
             let rule = StatementCountRule::new();
-            tracing::info!("Running StatementCount rule with args: {:?}", args);
-            rule.run(&args)
+            tracing::info!("Running StatementCount rule with args: {:?}", merged_args);
+            rule.run(&merged_args)
         }
         Commands::Volatility(args) => {
+            let merged_args = merge_volatility_args(&args, config);
             let rule = VolatilityRule::new();
-            tracing::info!("Running Volatility rule with args: {:?}", args);
-            rule.run(&args)
+            tracing::info!("Running Volatility rule with args: {:?}", merged_args);
+            rule.run(&merged_args)
         }
         Commands::Coupling(args) => {
+            let merged_args = merge_coupling_args(&args, config);
             let rule = CouplingRule::new();
-            tracing::info!("Running Coupling rule with args: {:?}", args);
-            rule.run(&args)
+            tracing::info!("Running Coupling rule with args: {:?}", merged_args);
+            rule.run(&merged_args)
         }
         Commands::RustCodeAnalysis(args) => {
+            let merged_args = merge_rust_code_analysis_args(&args, config);
             let rule = RustCodeAnalysisRule::new();
-            tracing::info!("Running RustCodeAnalysis rule with args: {:?}", args);
-            rule.run(&args)
+            tracing::info!("Running RustCodeAnalysis rule with args: {:?}", merged_args);
+            rule.run(&merged_args)
         }
         Commands::All(args) => {
-            tracing::info!("Running all rules with args: {:?}", args);
-            all_rules::run_all(&args)
+            let merged_args = merge_all_args(&args, config);
+            tracing::info!("Running all rules with args: {:?}", merged_args);
+            all_rules::run_all(&merged_args)
         }
         Commands::ContributorReport(args) => {
+            let merged_args = merge_contributor_report_args(&args, config);
             let rule = ContributorReportRule::new();
-            tracing::info!("Running ContributorReport rule with args: {:?}", args);
-            rule.run(&args)
+            tracing::info!(
+                "Running ContributorReport rule with args: {:?}",
+                merged_args
+            );
+            rule.run(&merged_args)
         }
     };
 
