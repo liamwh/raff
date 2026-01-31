@@ -670,6 +670,19 @@ threshold = 99
 
     #[test]
     fn test_load_hierarchical_config_with_user_config() {
+        // Use a known valid path since current_dir() might fail if previous test deleted its temp dir
+        let fallback_path = std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                tempfile::TempDir::new()
+                    .ok()
+                    .map(|d| d.path().to_path_buf())
+            })
+            .expect("Failed to get fallback path");
+        let original_cwd = std::env::current_dir().unwrap_or(fallback_path.clone());
+        let original_xdg = std::env::var_os("XDG_CONFIG_HOME");
+
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
 
         // Create user config directory structure
@@ -689,7 +702,6 @@ threshold = 15
 
         // Set XDG_CONFIG_HOME to xdg_config for this test
         // get_user_config_dir() will append "raff" to get xdg_config/raff
-        let original_xdg = std::env::var_os("XDG_CONFIG_HOME");
         std::env::set_var("XDG_CONFIG_HOME", xdg_config);
 
         // Also create a traditional config in the temp dir to avoid discovery issues
@@ -703,17 +715,15 @@ threshold = 10
         )
         .expect("Failed to write traditional config");
 
-        // Save current directory
-        let original_cwd = std::env::current_dir().expect("Failed to get cwd");
-
         // Change to temp directory
         std::env::set_current_dir(temp_dir.path()).expect("Failed to cd to temp dir");
 
         // Load config - should pick up user config and traditional config
         let result = load_hierarchical_config(None);
 
-        // Restore original directory
-        std::env::set_current_dir(&original_cwd).expect("Failed to restore cwd");
+        // Restore original directory - use fallback if original path no longer exists
+        let _ = std::env::set_current_dir(&original_cwd)
+            .or_else(|_| std::env::set_current_dir(&fallback_path));
 
         // Restore original environment before temp_dir is dropped
         if let Some(xdg) = original_xdg {
@@ -722,6 +732,7 @@ threshold = 10
             std::env::remove_var("XDG_CONFIG_HOME");
         }
 
+        // Now we can assert - temp_dir is still in scope but we're back in a valid directory
         assert!(
             result.is_ok(),
             "load_hierarchical_config should succeed: {:?}",
@@ -749,5 +760,7 @@ threshold = 10
                 .map(|s| s.config.statement_count.threshold)
                 .collect::<Vec<_>>()
         );
+
+        // temp_dir is dropped here, at the end of the function
     }
 }

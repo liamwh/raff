@@ -1,0 +1,16 @@
+---
+source: tests/config_hierarchy_snapshots.rs
+expression: formatted
+---
+## Sources
+  1. CliExplicit from cli-explicit.toml
+     statement_count.threshold: 99
+     volatility.alpha: 0.08
+     general.verbose: true
+
+## Merged Configuration
+  statement_count.threshold: 99
+  volatility.alpha: 0.08
+  general.verbose: true
+  volatility.normalize: false
+  coupling.granularity: Some("crate")

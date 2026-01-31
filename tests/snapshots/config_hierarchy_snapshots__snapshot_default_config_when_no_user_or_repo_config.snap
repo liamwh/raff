@@ -1,0 +1,12 @@
+---
+source: tests/config_hierarchy_snapshots.rs
+expression: formatted
+---
+## Sources
+
+## Merged Configuration
+  statement_count.threshold: 10
+  volatility.alpha: 0.01
+  general.verbose: false
+  volatility.normalize: false
+  coupling.granularity: None

@@ -846,14 +846,25 @@ verbose = true
 "#;
         fs::write(&config_path, content).expect("Failed to write config file");
 
-        let original_path = std::env::current_dir().expect("Failed to get current dir");
+        // Use a known valid path since current_dir() might fail if previous test deleted its temp dir
+        let fallback_path = std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                tempfile::TempDir::new()
+                    .ok()
+                    .map(|d| d.path().to_path_buf())
+            })
+            .expect("Failed to get fallback path");
+        let original_path = std::env::current_dir().unwrap_or(fallback_path.clone());
 
         std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
 
         let result = discover_and_load_config();
 
-        // Restore directory - temp_dir is still in scope here
-        let _ = std::env::set_current_dir(&original_path);
+        // Restore directory - use fallback if original path no longer exists
+        let _ = std::env::set_current_dir(&original_path)
+            .or_else(|_| std::env::set_current_dir(&fallback_path));
 
         assert!(result.is_ok(), "discover_and_load_config should succeed");
 
@@ -878,14 +889,25 @@ threshold = 50
 "#;
         fs::write(&config_path, content).expect("Failed to write config file");
 
-        let original_path = std::env::current_dir().expect("Failed to get current dir");
+        // Use a known valid path since current_dir() might fail if previous test deleted its temp dir
+        let fallback_path = std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                tempfile::TempDir::new()
+                    .ok()
+                    .map(|d| d.path().to_path_buf())
+            })
+            .expect("Failed to get fallback path");
+        let original_path = std::env::current_dir().unwrap_or(fallback_path.clone());
 
         std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
 
         let result = discover_and_load_config();
 
-        // Restore directory - ignore errors if temp dir was already cleaned up
-        let _ = std::env::set_current_dir(&original_path);
+        // Restore directory - use fallback if original path no longer exists
+        let _ = std::env::set_current_dir(&original_path)
+            .or_else(|_| std::env::set_current_dir(&fallback_path));
 
         assert!(result.is_ok(), "discover_and_load_config should succeed");
 
@@ -899,14 +921,26 @@ threshold = 50
     #[test]
     fn test_discover_and_load_config_returns_none_when_no_config() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let original_path = std::env::current_dir().expect("Failed to get current dir");
+
+        // Use a known valid path since current_dir() might fail if previous test deleted its temp dir
+        let fallback_path = std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                tempfile::TempDir::new()
+                    .ok()
+                    .map(|d| d.path().to_path_buf())
+            })
+            .expect("Failed to get fallback path");
+        let original_path = std::env::current_dir().unwrap_or(fallback_path.clone());
 
         std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
 
         let result = discover_and_load_config();
 
-        // Restore directory - ignore errors if temp dir was already cleaned up
-        let _ = std::env::set_current_dir(&original_path);
+        // Restore directory - use fallback if original path no longer exists
+        let _ = std::env::set_current_dir(&original_path)
+            .or_else(|_| std::env::set_current_dir(&fallback_path));
 
         assert!(result.is_ok(), "discover_and_load_config should succeed");
         assert!(
@@ -948,14 +982,26 @@ verbose = true
 "#;
         fs::write(&config_path, content).expect("Failed to write config file");
 
-        let original_path = std::env::current_dir().expect("Failed to get current dir");
+        // Use a known valid path (home directory or a temp location)
+        // since current_dir() might fail if previous test deleted its temp dir
+        let fallback_path = std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                tempfile::TempDir::new()
+                    .ok()
+                    .map(|d| d.path().to_path_buf())
+            })
+            .expect("Failed to get fallback path");
+        let original_path = std::env::current_dir().unwrap_or(fallback_path.clone());
 
         std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
 
         let result = load_config(None);
 
-        // Restore directory - ignore errors if temp dir was already cleaned up
-        let _ = std::env::set_current_dir(&original_path);
+        // Restore directory - use fallback if original path no longer exists
+        let _ = std::env::set_current_dir(&original_path)
+            .or_else(|_| std::env::set_current_dir(&fallback_path));
 
         assert!(result.is_ok(), "load_config should succeed");
         assert!(

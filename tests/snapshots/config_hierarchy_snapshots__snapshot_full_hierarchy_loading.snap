@@ -1,0 +1,24 @@
+---
+source: tests/config_hierarchy_snapshots.rs
+expression: formatted
+---
+## Sources
+  1. User from raff.toml
+     statement_count.threshold: 15
+     volatility.alpha: 0.02
+     general.verbose: true
+  2. RepoLocal from raff.local.toml
+     statement_count.threshold: 20
+     volatility.alpha: 0.03
+     general.verbose: false
+  3. TraditionalLocal from Raff.toml
+     statement_count.threshold: 25
+     volatility.alpha: 0.01
+     general.verbose: false
+
+## Merged Configuration
+  statement_count.threshold: 25
+  volatility.alpha: 0.01
+  general.verbose: true
+  volatility.normalize: true
+  coupling.granularity: Some("module")
