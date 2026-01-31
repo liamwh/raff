@@ -7,24 +7,24 @@ use chrono::{DateTime, Utc};
 use git2::{Commit, Repository};
 use maud::{html, Markup};
 use prettytable::{row, Table};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::cli::{ContributorReportArgs, ContributorReportOutputFormat};
 use crate::html_utils::{self, MetricRanges};
 
-#[derive(Debug, Clone, Serialize)]
-struct ContributorStats {
-    author: String,
-    commit_count: u32,
-    lines_added: u32,
-    lines_deleted: u32,
-    files_touched: u32,
-    last_commit_date: DateTime<Utc>,
-    score: f64,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContributorStats {
+    pub author: String,
+    pub commit_count: u32,
+    pub lines_added: u32,
+    pub lines_deleted: u32,
+    pub files_touched: u32,
+    pub last_commit_date: DateTime<Utc>,
+    pub score: f64,
 }
 
 impl ContributorStats {
-    fn new(author: String) -> Self {
+    pub fn new(author: String) -> Self {
         Self {
             author,
             commit_count: 0,
@@ -238,5 +238,344 @@ impl ContributorReportRule {
             ("Score", "A calculated metric representing the overall contribution. It is a weighted sum of commits, lines added, lines deleted, and files touched, with an exponential decay factor applied to give more weight to recent contributions. The formula is: `Σ((1 + churn + files_touched) * e^(-decay * days_since_commit))` for each commit."),
         ];
         html_utils::render_metric_explanation_list(&explanations)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper function to create test ContributorStats.
+    fn create_test_contributor_stats(
+        author: &str,
+        commit_count: u32,
+        lines_added: u32,
+        lines_deleted: u32,
+        files_touched: u32,
+        score: f64,
+    ) -> ContributorStats {
+        ContributorStats {
+            author: author.to_string(),
+            commit_count,
+            lines_added,
+            lines_deleted,
+            files_touched,
+            last_commit_date: Utc::now(),
+            score,
+        }
+    }
+
+    #[test]
+    fn test_contributor_stats_new_creates_default_instance() {
+        let stats = ContributorStats::new("Test Author".to_string());
+        assert_eq!(stats.author, "Test Author", "author should match input");
+        assert_eq!(stats.commit_count, 0, "commit_count should be 0");
+        assert_eq!(stats.lines_added, 0, "lines_added should be 0");
+        assert_eq!(stats.lines_deleted, 0, "lines_deleted should be 0");
+        assert_eq!(stats.files_touched, 0, "files_touched should be 0");
+        assert_eq!(stats.score, 0.0, "score should be 0.0");
+    }
+
+    #[test]
+    fn test_contributor_report_rule_new_creates_instance() {
+        let rule = ContributorReportRule::new();
+        // Just verify it can be created - it's a zero-sized struct
+        let _ = &rule;
+    }
+
+    #[test]
+    fn test_contributor_report_rule_default_creates_instance() {
+        let rule = ContributorReportRule::default();
+        // Just verify it can be created - it's a zero-sized struct
+        let _ = &rule;
+    }
+
+    #[test]
+    fn test_contributor_stats_is_serializable() {
+        let stats = create_test_contributor_stats("Alice", 10, 500, 200, 50, 1500.0);
+        let json = serde_json::to_string(&stats);
+        assert!(
+            json.is_ok(),
+            "ContributorStats should be serializable to JSON"
+        );
+        let json_str = json.unwrap();
+        assert!(
+            json_str.contains("Alice"),
+            "JSON output should contain author name"
+        );
+        assert!(
+            json_str.contains("500"),
+            "JSON output should contain lines_added"
+        );
+    }
+
+    #[test]
+    fn test_contributor_stats_clone_creates_independent_copy() {
+        let stats1 = create_test_contributor_stats("Bob", 5, 300, 100, 25, 750.0);
+        let mut stats2 = stats1.clone();
+
+        // Modify the clone
+        stats2.commit_count = 10;
+        stats2.score = 2000.0;
+
+        // Original should be unchanged
+        assert_eq!(
+            stats1.commit_count, 5,
+            "original commit_count should not be affected by clone modification"
+        );
+        assert_eq!(
+            stats1.score, 750.0,
+            "original score should not be affected by clone modification"
+        );
+
+        // Clone should have the new values
+        assert_eq!(
+            stats2.commit_count, 10,
+            "clone commit_count should reflect modification"
+        );
+        assert_eq!(
+            stats2.score, 2000.0,
+            "clone score should reflect modification"
+        );
+    }
+
+    #[test]
+    fn test_generate_report_body_produces_valid_markup() {
+        let rule = ContributorReportRule::new();
+        let stats = vec![create_test_contributor_stats(
+            "Charlie", 15, 750, 300, 75, 3000.0,
+        )];
+
+        let markup = rule.generate_report_body(&stats);
+        let markup_string = markup.into_string();
+
+        assert!(
+            markup_string.contains("Charlie"),
+            "generated HTML should contain contributor name"
+        );
+        assert!(
+            markup_string.contains("15"),
+            "generated HTML should contain commit count"
+        );
+        assert!(
+            markup_string.contains("750"),
+            "generated HTML should contain lines added"
+        );
+        assert!(
+            markup_string.contains("300"),
+            "generated HTML should contain lines deleted"
+        );
+        assert!(
+            markup_string.contains("75"),
+            "generated HTML should contain files touched"
+        );
+    }
+
+    #[test]
+    fn test_generate_report_body_with_empty_stats() {
+        let rule = ContributorReportRule::new();
+        let stats: Vec<ContributorStats> = vec![];
+
+        let markup = rule.generate_report_body(&stats);
+        let markup_string = markup.into_string();
+
+        assert!(
+            markup_string.contains("table"),
+            "generated HTML should contain table element"
+        );
+        assert!(
+            markup_string.contains("thead"),
+            "generated HTML should contain table header"
+        );
+        assert!(
+            markup_string.contains("Author"),
+            "generated HTML should contain Author column header"
+        );
+        assert!(
+            markup_string.contains("Score"),
+            "generated HTML should contain Score column header"
+        );
+    }
+
+    #[test]
+    fn test_generate_report_body_with_multiple_contributors() {
+        let rule = ContributorReportRule::new();
+        let stats = vec![
+            create_test_contributor_stats("Alice", 20, 1000, 400, 100, 4000.0),
+            create_test_contributor_stats("Bob", 15, 750, 300, 75, 3000.0),
+            create_test_contributor_stats("Charlie", 5, 200, 50, 10, 500.0),
+        ];
+
+        let markup = rule.generate_report_body(&stats);
+        let markup_string = markup.into_string();
+
+        assert!(
+            markup_string.contains("Alice"),
+            "generated HTML should contain first contributor"
+        );
+        assert!(
+            markup_string.contains("Bob"),
+            "generated HTML should contain second contributor"
+        );
+        assert!(
+            markup_string.contains("Charlie"),
+            "generated HTML should contain third contributor"
+        );
+    }
+
+    #[test]
+    fn test_render_explanation_produces_valid_markup() {
+        let rule = ContributorReportRule::new();
+        let markup = rule.render_explanation();
+        let markup_string = markup.into_string();
+
+        assert!(
+            markup_string.contains("Author"),
+            "explanation should describe Author field"
+        );
+        assert!(
+            markup_string.contains("Commit Count"),
+            "explanation should describe Commit Count field"
+        );
+        assert!(
+            markup_string.contains("Lines Added"),
+            "explanation should describe Lines Added field"
+        );
+        assert!(
+            markup_string.contains("Lines Deleted"),
+            "explanation should describe Lines Deleted field"
+        );
+        assert!(
+            markup_string.contains("Files Touched"),
+            "explanation should describe Files Touched field"
+        );
+        assert!(
+            markup_string.contains("Score"),
+            "explanation should describe Score field"
+        );
+        assert!(
+            markup_string.contains("churn"),
+            "explanation should describe the score formula"
+        );
+    }
+
+    #[test]
+    fn test_print_json_produces_valid_json() {
+        let rule = ContributorReportRule::new();
+        let stats = vec![
+            create_test_contributor_stats("Alice", 10, 500, 200, 50, 1500.0),
+            create_test_contributor_stats("Bob", 5, 300, 100, 25, 750.0),
+        ];
+
+        // Redirect stdout to capture the output
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.print_json(&stats)));
+
+        assert!(
+            result.is_ok(),
+            "print_json should not panic when given valid stats"
+        );
+    }
+
+    #[test]
+    fn test_print_yaml_produces_valid_yaml() {
+        let rule = ContributorReportRule::new();
+        let stats = vec![create_test_contributor_stats(
+            "Alice", 10, 500, 200, 50, 1500.0,
+        )];
+
+        // Redirect stdout to capture the output
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.print_yaml(&stats)));
+
+        assert!(
+            result.is_ok(),
+            "print_yaml should not panic when given valid stats"
+        );
+    }
+
+    #[test]
+    fn test_print_table_produces_valid_output() {
+        let rule = ContributorReportRule::new();
+        let stats = vec![create_test_contributor_stats(
+            "Alice", 10, 500, 200, 50, 1500.0,
+        )];
+
+        // Redirect stdout to capture the output
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.print_table(&stats)));
+
+        assert!(
+            result.is_ok(),
+            "print_table should not panic when given valid stats"
+        );
+    }
+
+    #[test]
+    fn test_contributor_stats_with_zero_values() {
+        let stats = ContributorStats::new("Zero Hero".to_string());
+        assert_eq!(stats.commit_count, 0, "commit_count should be 0");
+        assert_eq!(stats.lines_added, 0, "lines_added should be 0");
+        assert_eq!(stats.lines_deleted, 0, "lines_deleted should be 0");
+        assert_eq!(stats.files_touched, 0, "files_touched should be 0");
+        assert_eq!(stats.score, 0.0, "score should be 0.0");
+    }
+
+    #[test]
+    fn test_contributor_stats_json_roundtrip() {
+        let original = create_test_contributor_stats("Roundtrip", 100, 5000, 2000, 500, 15000.0);
+
+        let json = serde_json::to_string(&original);
+        assert!(json.is_ok(), "ContributorStats should serialize to JSON");
+
+        let deserialized: Result<ContributorStats, _> = serde_json::from_str(&json.unwrap());
+        assert!(
+            deserialized.is_ok(),
+            "JSON should deserialize back to ContributorStats"
+        );
+
+        let stats = deserialized.unwrap();
+        assert_eq!(
+            stats.author, original.author,
+            "author should survive roundtrip"
+        );
+        assert_eq!(
+            stats.commit_count, original.commit_count,
+            "commit_count should survive roundtrip"
+        );
+        assert_eq!(
+            stats.lines_added, original.lines_added,
+            "lines_added should survive roundtrip"
+        );
+        assert_eq!(
+            stats.lines_deleted, original.lines_deleted,
+            "lines_deleted should survive roundtrip"
+        );
+        assert_eq!(
+            stats.files_touched, original.files_touched,
+            "files_touched should survive roundtrip"
+        );
+        assert!(
+            (stats.score - original.score).abs() < f64::EPSILON,
+            "score should survive roundtrip"
+        );
+    }
+
+    #[test]
+    fn test_contributor_stats_yaml_serialization() {
+        let stats = create_test_contributor_stats("Yaml Author", 25, 1200, 450, 120, 3500.0);
+
+        let yaml = serde_yaml::to_string(&stats);
+        assert!(yaml.is_ok(), "ContributorStats should serialize to YAML");
+
+        let yaml_string = yaml.unwrap();
+        assert!(
+            yaml_string.contains("Yaml Author"),
+            "YAML output should contain author name"
+        );
+        assert!(
+            yaml_string.contains("1200"),
+            "YAML output should contain lines added"
+        );
     }
 }
