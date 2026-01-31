@@ -4,7 +4,7 @@
 //! and merge them with command-line arguments. CLI arguments take precedence
 //! over config file values.
 
-use anyhow::{Context, Result};
+use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -243,11 +243,9 @@ pub fn load_config_from_path(path: &Path) -> Result<Option<RaffConfig>> {
         return Ok(None);
     }
 
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read configuration file from {}", path.display()))?;
+    let content = fs::read_to_string(path)?;
 
-    let config: RaffConfig = toml::from_str(&content)
-        .with_context(|| format!("Failed to parse configuration file from {}", path.display()))?;
+    let config: RaffConfig = toml::from_str(&content)?;
 
     Ok(Some(config))
 }
@@ -262,7 +260,7 @@ pub fn load_config_from_path(path: &Path) -> Result<Option<RaffConfig>> {
 /// Returns `Some(RaffConfig)` if a config file is found and can be parsed.
 /// Returns `None` if no config file is found.
 pub fn discover_and_load_config() -> Result<Option<(PathBuf, RaffConfig)>> {
-    let mut current_dir = std::env::current_dir().context("Failed to get current directory")?;
+    let mut current_dir = std::env::current_dir()?;
 
     // Search up the directory tree for a config file
     loop {
