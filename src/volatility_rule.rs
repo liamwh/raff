@@ -128,6 +128,10 @@ pub struct CrateInfo {
 /// A map from crate name (String) to its `CrateStats`.
 pub type CrateStatsMap = HashMap<String, CrateStats>;
 
+/// Cache version for volatility data.
+/// Increment this when the serialization format changes to invalidate old cache entries.
+const VOLATILITY_CACHE_VERSION: &str = "1";
+
 /// Rule to calculate code volatility for each crate in a Git repository.
 #[derive(Debug, Default)]
 pub struct VolatilityRule;
@@ -777,6 +781,10 @@ impl VolatilityRule {
 
         // Build cache parameters from analysis arguments
         let mut cache_params = vec![
+            (
+                "cache_version".to_string(),
+                VOLATILITY_CACHE_VERSION.to_string(),
+            ),
             ("alpha".to_string(), args.alpha.to_string()),
             ("normalize".to_string(), args.normalize.to_string()),
         ];
