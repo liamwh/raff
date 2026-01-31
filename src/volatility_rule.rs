@@ -92,6 +92,7 @@ use crate::cache::{CacheEntry, CacheKey, CacheManager};
 use crate::cli::{VolatilityArgs, VolatilityOutputFormat}; // Ensure VolatilityOutputFormat is imported
 use crate::error::{RaffError, Result};
 use crate::html_utils; // Import the new HTML utilities
+use crate::rule::Rule;
 
 /// Represents the statistics gathered for a single crate.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)] // Clone is useful for initialization, Deserialize for testing
@@ -154,9 +155,38 @@ pub struct VolatilityData {
     pub analysis_path: PathBuf,
 }
 
+impl Rule for VolatilityRule {
+    type Config = VolatilityArgs;
+    type Data = VolatilityData;
+
+    fn name() -> &'static str {
+        "volatility"
+    }
+
+    fn description() -> &'static str {
+        "Analyzes code volatility in Git repositories by tracking commit frequency and code churn"
+    }
+
+    fn run(&self, config: &Self::Config) -> Result<()> {
+        self.run_impl(config)
+    }
+
+    fn analyze(&self, config: &Self::Config) -> Result<Self::Data> {
+        self.analyze_impl(config)
+    }
+}
+
 impl VolatilityRule {
     pub fn new() -> Self {
         VolatilityRule
+    }
+
+    pub fn run(&self, args: &VolatilityArgs) -> Result<()> {
+        self.run_impl(args)
+    }
+
+    pub fn analyze(&self, args: &VolatilityArgs) -> Result<VolatilityData> {
+        self.analyze_impl(args)
     }
 
     /// Step 2 & 3: Identify crates and initialize their statistics.
@@ -606,7 +636,7 @@ impl VolatilityRule {
     }
 
     #[tracing::instrument(level = "debug", skip_all, err)]
-    pub fn run(&self, args: &VolatilityArgs) -> Result<()> {
+    fn run_impl(&self, args: &VolatilityArgs) -> Result<()> {
         let data = self.analyze(args)?;
 
         // Sort crates by raw_score (descending) for display
@@ -723,7 +753,7 @@ impl VolatilityRule {
     }
 
     #[tracing::instrument(level = "debug", skip_all, err)]
-    pub fn analyze(&self, args: &VolatilityArgs) -> Result<VolatilityData> {
+    fn analyze_impl(&self, args: &VolatilityArgs) -> Result<VolatilityData> {
         let analysis_path = &args.path;
         let analysis_path_canonical = analysis_path.canonicalize()?;
 
@@ -1789,5 +1819,127 @@ edition = "2021"
         assert!(result.is_some());
         let (name, _path) = result.unwrap();
         assert_eq!(name, "deeply-nested");
+    }
+
+    // Tests for the Rule trait implementation
+    use crate::rule::Rule;
+
+    #[test]
+    fn test_rule_name_returns_volatility() {
+        assert_eq!(
+            VolatilityRule::name(),
+            "volatility",
+            "Rule name should be 'volatility'"
+        );
+    }
+
+    #[test]
+    fn test_rule_description_returns_meaningful_text() {
+        let description = VolatilityRule::description();
+        assert!(
+            !description.is_empty(),
+            "Rule description should not be empty"
+        );
+        assert!(
+            description.contains("volatility")
+                || description.contains("Git")
+                || description.contains("churn"),
+            "Rule description should describe the rule's purpose"
+        );
+    }
+
+    #[test]
+    fn test_rule_trait_run_delegates_correctly() {
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
+        let rule = VolatilityRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        // Call the Rule trait's run method
+        let result = <VolatilityRule as Rule>::run(&rule, &args);
+
+        assert!(
+            result.is_ok(),
+            "Rule trait run method should succeed with valid git repository"
+        );
+    }
+
+    #[test]
+    fn test_rule_trait_analyze_returns_correct_data_type() {
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
+        let rule = VolatilityRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        // Call the Rule trait's analyze method
+        let result = <VolatilityRule as Rule>::analyze(&rule, &args);
+
+        assert!(
+            result.is_ok(),
+            "Rule trait analyze method should succeed with valid input"
+        );
+
+        let data = result.unwrap();
+        assert_eq!(
+            data.alpha, 0.5,
+            "Analyzed data should have the correct alpha"
+        );
+        assert!(
+            !data.crate_stats_map.is_empty(),
+            "Analyzed data should have crate stats"
+        );
+    }
+
+    #[test]
+    fn test_rule_trait_analyze_fails_with_non_git_repository() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        // Create Cargo.toml without git repo
+        let cargo_toml = r#"
+[package]
+name = "no-git-crate"
+version = "0.1.0"
+edition = "2021"
+"#;
+        fs::write(temp_dir.path().join("Cargo.toml"), cargo_toml)
+            .expect("Failed to write Cargo.toml");
+
+        let rule = VolatilityRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        // Call the Rule trait's analyze method
+        let result = <VolatilityRule as Rule>::analyze(&rule, &args);
+
+        assert!(
+            result.is_err(),
+            "Rule trait analyze method should fail with non-git repository"
+        );
+    }
+
+    #[test]
+    fn test_rule_associated_types_match() {
+        // This test verifies that the associated types are correctly set
+        // It's a compile-time check; if it compiles, the types are correct
+        let rule = VolatilityRule::new();
+
+        // Verify Config type is VolatilityArgs
+        let config = VolatilityArgs {
+            path: PathBuf::from("."),
+            alpha: 0.5,
+            since: None,
+            normalize: false,
+            output: VolatilityOutputFormat::Table,
+            skip_merges: false,
+        };
+
+        // Verify Data type is VolatilityData
+        let _config_check: <VolatilityRule as Rule>::Config = config;
+        // We can't directly check Data type without an instance, but the
+        // analyze method returning Result<VolatilityData> confirms it
+
+        // Verify run and analyze work with these types
+        let _ = rule;
     }
 }

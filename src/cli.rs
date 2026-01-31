@@ -86,7 +86,7 @@ pub enum VolatilityOutputFormat {
 }
 
 /// Arguments for the `volatility` subcommand.
-#[derive(Args, Debug)]
+#[derive(Args, Clone, Debug)]
 pub struct VolatilityArgs {
     /// Path to the Git repository to analyze.
     #[clap(long, short, default_value = ".")]
