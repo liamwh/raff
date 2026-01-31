@@ -1,7 +1,8 @@
+use raff_core::error::Result;
 use raff_core::{RustCodeAnalysisArgs, RustCodeAnalysisOutputFormat, RustCodeAnalysisRule};
 use std::path::PathBuf;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     let args = RustCodeAnalysisArgs {
         path: PathBuf::from("."),
         extra_flags: vec![],

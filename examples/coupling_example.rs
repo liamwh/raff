@@ -1,7 +1,8 @@
+use raff_core::error::Result;
 use raff_core::{CouplingArgs, CouplingGranularity, CouplingOutputFormat, CouplingRule};
 use std::path::PathBuf;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     let args = CouplingArgs {
         path: PathBuf::from("."),
         output: CouplingOutputFormat::Table,

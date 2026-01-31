@@ -1,4 +1,3 @@
-use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, TimeZone, Utc}; // For parsing --since date
 use git2::{DiffOptions, Repository, Sort, TreeWalkMode, TreeWalkResult};
 use maud::{html, Markup};
@@ -14,6 +13,7 @@ use toml::Value as TomlValue;
 use walkdir::WalkDir; // For recursively finding Cargo.toml files // For parsing Cargo.toml
 
 use crate::cli::{VolatilityArgs, VolatilityOutputFormat}; // Ensure VolatilityOutputFormat is imported
+use crate::error::{RaffError, Result};
 use crate::html_utils; // Import the new HTML utilities
 
 /// Represents the statistics gathered for a single crate.
@@ -121,28 +121,17 @@ impl VolatilityRule {
 
             let crate_root_relative = crate_root_abs
                 .strip_prefix(analysis_path_canonical)
-                .with_context(|| {
-                    format!(
-                        "Failed to make crate root path '{}' relative to repo root '{}'",
-                        crate_root_abs.display(),
-                        analysis_path_canonical.display()
+                .map_err(|e| {
+                    RaffError::parse_error_with_file(
+                        crate_root_abs.clone(),
+                        format!("Failed to make crate root path relative: {}", e),
                     )
                 })?
                 .to_path_buf();
 
-            let content = fs::read_to_string(cargo_toml_path_abs).with_context(|| {
-                format!(
-                    "Failed to read Cargo.toml at {}",
-                    cargo_toml_path_abs.display()
-                )
-            })?;
+            let content = fs::read_to_string(cargo_toml_path_abs)?;
 
-            let toml_value = content.parse::<TomlValue>().with_context(|| {
-                format!(
-                    "Failed to parse Cargo.toml at {}",
-                    cargo_toml_path_abs.display()
-                )
-            })?;
+            let toml_value = content.parse::<TomlValue>()?;
 
             let crate_name_opt = toml_value
                 .get("package")
@@ -185,9 +174,12 @@ impl VolatilityRule {
         }
 
         if crate_stats_map.is_empty() {
-            return Err(anyhow::anyhow!(
-                "No crates (Cargo.toml with [package].name) found under {}. Ensure you are running in a Rust project with crates.",
-                analysis_path_canonical.display()
+            return Err(RaffError::analysis_error(
+                "volatility",
+                format!(
+                    "No crates (Cargo.toml with [package].name) found under {}. Ensure you are running in a Rust project with crates.",
+                    analysis_path_canonical.display()
+                ),
             ));
         }
         Ok(crate_stats_map)
@@ -234,14 +226,10 @@ impl VolatilityRule {
         {
             let file_path = entry.path();
             tracing::trace!(file = %file_path.display(), "Counting LoC for file");
-            let file = fs::File::open(file_path).with_context(|| {
-                format!("Failed to open file for LoC count: {}", file_path.display())
-            })?;
+            let file = fs::File::open(file_path)?;
             let reader = BufReader::new(file);
             for line_result in reader.lines() {
-                let line = line_result.with_context(|| {
-                    format!("Failed to read line from file: {}", file_path.display())
-                })?;
+                let line = line_result?;
                 if !line.trim().is_empty() {
                     total_loc += 1;
                 }
@@ -382,14 +370,10 @@ impl VolatilityRule {
         let mut crates_needing_birth_time = crate_stats_map.len();
 
         for oid_result in revwalk {
-            let oid = oid_result.with_context(|| "Failed to get OID from birth-time revwalk")?;
-            let commit = repo
-                .find_commit(oid)
-                .with_context(|| "Failed to find commit from OID in birth-time revwalk")?;
+            let oid = oid_result?;
+            let commit = repo.find_commit(oid)?;
             let commit_time = commit.time().seconds();
-            let tree = commit
-                .tree()
-                .with_context(|| "Failed to get tree for commit in birth-time revwalk")?;
+            let tree = commit.tree()?;
 
             tracing::trace!(commit_oid = %commit.id(), commit_time, "Scanning commit for crate births");
 
@@ -406,7 +390,15 @@ impl VolatilityRule {
                             return TreeWalkResult::Skip;
                         }
                         TreeWalkResult::Ok
-                    }).with_context(|| format!("Error walking tree for commit {} to find birth of crate {}", commit.id(), crate_name))?;
+                    })
+                    .map_err(|e| {
+                        RaffError::git_error(format!(
+                            "walk tree for commit {} to find birth of crate {}: {}",
+                            commit.id(),
+                            crate_name,
+                            e
+                        ))
+                    })?;
 
                     if found_birth {
                         crates_needing_birth_time -= 1;
@@ -628,7 +620,12 @@ impl VolatilityRule {
                             wtr.write_record(&row)?;
                         }
 
-                        let csv_string = String::from_utf8(wtr.into_inner()?)?;
+                        let csv_string = String::from_utf8(wtr.into_inner().map_err(|e| {
+                            RaffError::parse_error(format!("Failed to get CSV bytes: {}", e))
+                        })?)
+                        .map_err(|e| {
+                            RaffError::parse_error(format!("Failed to convert CSV to UTF-8: {}", e))
+                        })?;
                         println!("{csv_string}");
                     }
                     _ => unreachable!(), // Should not happen given the parent match arm
@@ -651,15 +648,13 @@ impl VolatilityRule {
     #[tracing::instrument(level = "debug", skip_all, err)]
     pub fn analyze(&self, args: &VolatilityArgs) -> Result<VolatilityData> {
         let analysis_path = &args.path;
-        let analysis_path_canonical = analysis_path
-            .canonicalize()
-            .with_context(|| format!("Failed to canonicalize path: {}", analysis_path.display()))?;
+        let analysis_path_canonical = analysis_path.canonicalize()?;
         tracing::info!(path = %analysis_path_canonical.display(), "Running volatility analysis on repository");
 
-        let repo = Repository::open(&analysis_path_canonical).with_context(|| {
-            format!(
-                "Could not open Git repository at '{}'",
-                analysis_path_canonical.display()
+        let repo = Repository::open(&analysis_path_canonical).map_err(|e| {
+            RaffError::git_error_with_repo(
+                format!("open Git repository: {}", e),
+                analysis_path_canonical.clone(),
             )
         })?;
         tracing::debug!("Successfully opened Git repository.");
@@ -679,10 +674,12 @@ impl VolatilityRule {
                         .timestamp()
                 })
                 .map_err(|e| {
-                    anyhow::anyhow!(
-                        "Invalid --since date format '{}': {}. Please use YYYY-MM-DD.",
-                        date_str,
-                        e
+                    RaffError::invalid_input_with_arg(
+                        format!(
+                            "Invalid --since date format '{}': {}. Please use YYYY-MM-DD.",
+                            date_str, e
+                        ),
+                        date_str.to_string(),
                     )
                 })
         })?;
@@ -699,10 +696,8 @@ impl VolatilityRule {
         let mut pending_stat_updates: Vec<(String, char)> = Vec::new(); // For deferred updates
 
         for oid_result in revwalk {
-            let oid = oid_result.with_context(|| "Failed to walk revisions")?;
-            let commit = repo
-                .find_commit(oid)
-                .with_context(|| "Failed to find commit")?;
+            let oid = oid_result?;
+            let commit = repo.find_commit(oid)?;
             let commit_time = commit.time().seconds();
 
             let parents: Vec<_> = commit.parents().collect();
@@ -711,7 +706,7 @@ impl VolatilityRule {
                 continue;
             }
 
-            let tree = commit.tree().with_context(|| "Failed to get commit tree")?;
+            let tree = commit.tree()?;
             let parent_tree_opt = if !parents.is_empty() {
                 parents[0].tree().ok()
             } else {
@@ -722,9 +717,11 @@ impl VolatilityRule {
             diff_opts.context_lines(0);
             diff_opts.interhunk_lines(0);
 
-            let diff = repo
-                .diff_tree_to_tree(parent_tree_opt.as_ref(), Some(&tree), Some(&mut diff_opts))
-                .with_context(|| "Failed to compute diff")?;
+            let diff = repo.diff_tree_to_tree(
+                parent_tree_opt.as_ref(),
+                Some(&tree),
+                Some(&mut diff_opts),
+            )?;
 
             if commit_time < since_timestamp {
                 tracing::trace!(commit_id = %oid, commit_date = %DateTime::from_timestamp(commit_time, 0).unwrap().format("%Y-%m-%d"), "Commit is older than --since date, skipping for volatility calculation (but was considered for birth date).");
@@ -767,7 +764,7 @@ impl VolatilityRule {
                     true
                 }),
             )
-            .with_context(|| "Error processing diff lines")?;
+            .map_err(|e| RaffError::git_error(format!("process diff lines: {}", e)))?;
 
             // Apply pending updates for the current commit
             for (crate_name, origin) in &pending_stat_updates {
@@ -838,7 +835,11 @@ mod tests {
     fn init_git_repo(dir: &PathBuf) -> Result<()> {
         let output = Command::new("git").arg("init").current_dir(dir).output()?;
         if !output.status.success() {
-            return Err(anyhow::anyhow!("Failed to init git repo: {:?}", output));
+            return Err(RaffError::io_error_with_source(
+                "init git repo",
+                dir.clone(),
+                std::io::Error::other(format!("Git init failed with status: {:?}", output.status)),
+            ));
         }
         Ok(())
     }
@@ -870,9 +871,13 @@ mod tests {
             .output()?;
 
         if !output.status.success() {
-            return Err(anyhow::anyhow!(
-                "Failed to create commit: {:?}",
-                String::from_utf8_lossy(&output.stderr)
+            return Err(RaffError::io_error_with_source(
+                "create commit",
+                dir.clone(),
+                std::io::Error::other(format!(
+                    "Failed to create commit: {:?}",
+                    String::from_utf8_lossy(&output.stderr)
+                )),
             ));
         }
         Ok(())

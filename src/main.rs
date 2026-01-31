@@ -1,16 +1,20 @@
 //! rust-ff: A collection of Rust code analysis tools and fitness functions.
 
-use anyhow::Result;
 use clap::Parser;
 use raff_core::{
-    all_rules, load_config, Cli, Commands, ContributorReportRule, CouplingRule,
+    all_rules, error::Result, load_config, Cli, Commands, ContributorReportRule, CouplingRule,
     RustCodeAnalysisRule, StatementCountRule, VolatilityRule,
 };
 use std::process::exit;
 
 fn main() -> Result<()> {
     // Initialize color-eyre for better error reporting
-    color_eyre::install().map_err(|e| anyhow::anyhow!("Failed to install color-eyre: {}", e))?;
+    color_eyre::install().map_err(|e| {
+        raff_core::error::RaffError::analysis_error(
+            "main",
+            format!("Failed to install color-eyre: {}", e),
+        )
+    })?;
 
     // Initialize tracing subscriber with environment filter
     // Example: RUST_LOG=aff=debug,warn (aff is the binary name)
@@ -18,8 +22,12 @@ fn main() -> Result<()> {
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .map_err(|e| anyhow::anyhow!("Failed to set global default tracing subscriber: {}", e))?;
+    tracing::subscriber::set_global_default(subscriber).map_err(|e| {
+        raff_core::error::RaffError::analysis_error(
+            "main",
+            format!("Failed to set global default tracing subscriber: {}", e),
+        )
+    })?;
 
     let cli_args = Cli::parse();
     tracing::debug!("Parsed CLI arguments: {:?}", cli_args);

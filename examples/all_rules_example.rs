@@ -1,7 +1,8 @@
+use raff_core::error::Result;
 use raff_core::{all_rules, AllArgs, AllOutputFormat, CouplingGranularity};
 use std::path::PathBuf;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     let args = AllArgs {
         path: PathBuf::from("."),
         output: AllOutputFormat::Html,

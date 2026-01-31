@@ -1,7 +1,8 @@
+use raff_core::error::Result;
 use raff_core::{StatementCountArgs, StatementCountOutputFormat, StatementCountRule};
 use std::path::PathBuf;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     let args = StatementCountArgs {
         path: PathBuf::from("."),
         threshold: 10,

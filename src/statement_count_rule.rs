@@ -1,4 +1,3 @@
-use anyhow::{bail, Context, Result};
 use maud::html;
 use maud::Markup;
 use serde::Serialize;
@@ -8,6 +7,7 @@ use syn::File as SynFile;
 
 use crate::cli::{StatementCountArgs, StatementCountOutputFormat}; // Import the specific args struct
 use crate::counter::StmtCounter; // Assuming counter.rs is at crate::counter
+use crate::error::{RaffError, Result};
 use crate::file_utils::{collect_all_rs, relative_namespace, top_level_component}; // Assuming file_utils.rs is at crate::file_utils
 use crate::html_utils; // Now using Maud-based html_utils
 use crate::reporting::print_report; // Assuming reporting.rs is at crate::reporting // Import the new HTML utilities
@@ -41,10 +41,13 @@ impl StatementCountRule {
                 let any_over_threshold =
                     print_report(&data.component_stats, data.grand_total, data.threshold);
                 if any_over_threshold {
-                    bail!(
-                        "At least one component exceeds {}% of total statements.",
-                        data.threshold
-                    );
+                    return Err(RaffError::analysis_error(
+                        "statement_count",
+                        format!(
+                            "At least one component exceeds {}% of total statements.",
+                            data.threshold
+                        ),
+                    ));
                 }
                 println!(
                     "\nAll components are within {}% threshold. (Total statements = {})",
@@ -69,10 +72,13 @@ impl StatementCountRule {
                             percentage > data.threshold
                         });
                 if any_over_threshold {
-                    bail!(
-                        "At least one component exceeds {}% of total statements (see HTML report for details).",
-                        data.threshold
-                    );
+                    return Err(RaffError::analysis_error(
+                        "statement_count",
+                        format!(
+                            "At least one component exceeds {}% of total statements (see HTML report for details).",
+                            data.threshold
+                        ),
+                    ));
                 }
             }
         }
@@ -84,36 +90,32 @@ impl StatementCountRule {
         let analysis_path = &args.path;
 
         if !analysis_path.exists() {
-            bail!("Error: Path not found at {}", analysis_path.display());
+            return Err(RaffError::invalid_input_with_arg(
+                "Path not found",
+                analysis_path.display().to_string(),
+            ));
         }
         if !analysis_path.is_dir() {
-            bail!(
-                "Error: Provided path '{}' is not a directory.",
-                analysis_path.display()
-            );
+            return Err(RaffError::invalid_input_with_arg(
+                "Provided path is not a directory",
+                analysis_path.display().to_string(),
+            ));
         }
 
         let mut all_rs_files: Vec<PathBuf> = Vec::new();
-        collect_all_rs(analysis_path, &mut all_rs_files).with_context(|| {
-            format!(
-                "Failed to collect Rust files from {}",
-                analysis_path.display()
-            )
-        })?;
+        collect_all_rs(analysis_path, &mut all_rs_files)?;
 
         if all_rs_files.is_empty() {
-            bail!(
-                "Error: No `.rs` files found under {}",
-                analysis_path.display()
-            );
+            return Err(RaffError::analysis_error(
+                "statement_count",
+                format!("No `.rs` files found under {}", analysis_path.display()),
+            ));
         }
 
         let mut file_to_stmt: HashMap<String, usize> = HashMap::new();
         for path_buf in &all_rs_files {
-            let content = fs::read_to_string(path_buf)
-                .with_context(|| format!("Error reading file {}", path_buf.display()))?;
-            let ast: SynFile = syn::parse_file(&content)
-                .with_context(|| format!("Error parsing file {}", path_buf.display()))?;
+            let content = fs::read_to_string(path_buf)?;
+            let ast: SynFile = syn::parse_file(&content)?;
             let mut counter = StmtCounter::new();
             counter.visit_file(&ast);
             let key = path_buf.to_string_lossy().into_owned();
@@ -121,10 +123,13 @@ impl StatementCountRule {
         }
 
         if file_to_stmt.is_empty() {
-            bail!(
-                "Error: Did not find any Rust AST statements under {}",
-                analysis_path.display()
-            );
+            return Err(RaffError::analysis_error(
+                "statement_count",
+                format!(
+                    "Did not find any Rust AST statements under {}",
+                    analysis_path.display()
+                ),
+            ));
         }
 
         let mut component_stats: HashMap<String, (usize, usize)> = HashMap::new();
@@ -140,7 +145,13 @@ impl StatementCountRule {
 
         let grand_total: usize = component_stats.values().map(|&(_f, st)| st).sum();
         if grand_total == 0 {
-            bail!("Error: Total Rust statements = 0. Ensure .rs files contain statements or check parsing. Path: {}", analysis_path.display());
+            return Err(RaffError::analysis_error(
+                "statement_count",
+                format!(
+                    "Total Rust statements = 0. Ensure .rs files contain statements or check parsing. Path: {}",
+                    analysis_path.display()
+                ),
+            ));
         }
 
         Ok(StatementCountData {

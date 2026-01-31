@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::error::{RaffError, Result};
 use maud::{html, Markup};
 use prettytable::{Cell, Row, Table};
 use serde::{Deserialize, Serialize};
@@ -192,13 +192,16 @@ impl CouplingRule {
     ) -> Result<CrateLevelAnalysisResult> {
         let analysis_path = &args.path;
         if !analysis_path.exists() {
-            anyhow::bail!("Provided path does not exist: {}", analysis_path.display());
+            return Err(RaffError::invalid_input(format!(
+                "Provided path does not exist: {}",
+                analysis_path.display()
+            )));
         }
         if !analysis_path.is_dir() {
-            anyhow::bail!(
+            return Err(RaffError::invalid_input(format!(
                 "Provided path is not a directory: {}",
                 analysis_path.display()
-            );
+            )));
         }
         tracing::info!(
             "Analyzing coupling in directory: {}",
@@ -210,15 +213,16 @@ impl CouplingRule {
             .arg("--format-version")
             .arg("1")
             .current_dir(analysis_path)
-            .output()
-            .context("Failed to execute cargo metadata")?;
+            .output()?;
         if !metadata_output.status.success() {
             let stderr = String::from_utf8_lossy(&metadata_output.stderr);
-            anyhow::bail!("cargo metadata failed: {}", stderr);
+            return Err(RaffError::parse_error(format!(
+                "cargo metadata failed: {}",
+                stderr
+            )));
         }
         let metadata_json = String::from_utf8_lossy(&metadata_output.stdout);
-        let metadata: CargoMetadata =
-            serde_json::from_str(&metadata_json).context("Failed to parse cargo metadata JSON")?;
+        let metadata: CargoMetadata = serde_json::from_str(&metadata_json)?;
 
         let workspace_member_ids: HashSet<_> = metadata.workspace_members.iter().cloned().collect();
         let mut package_id_to_name: HashMap<String, String> = HashMap::new();
@@ -350,9 +354,7 @@ impl CouplingRule {
             .collect();
 
         for (current_module_path_str, source_file_path) in &module_map {
-            let content = fs::read_to_string(source_file_path).with_context(|| {
-                format!("Failed to read module file: {}", source_file_path.display())
-            })?;
+            let content = fs::read_to_string(source_file_path)?;
             match syn::parse_file(&content) {
                 Ok(ast) => {
                     let mut visitor = ModuleDependencyVisitor::new(
@@ -773,12 +775,7 @@ impl CouplingRule {
             }
         }
         for entry in WalkDir::new(current_dir).min_depth(1).max_depth(1) {
-            let entry = entry.with_context(|| {
-                format!(
-                    "Failed to read directory entry in {}",
-                    current_dir.display()
-                )
-            })?;
+            let entry = entry?;
             let path = entry.path();
             let file_name = entry.file_name().to_string_lossy();
             if path.is_dir() {
@@ -833,12 +830,7 @@ impl CouplingRule {
         base_module_path_str: &str,
         _module_map: &mut HashMap<String, PathBuf>,
     ) -> Result<()> {
-        let content = fs::read_to_string(file_path).with_context(|| {
-            format!(
-                "Failed to read file for inline module discovery: {}",
-                file_path.display()
-            )
-        })?;
+        let content = fs::read_to_string(file_path)?;
         match syn::parse_file(&content) {
             Ok(ast) => {
                 for item in ast.items {

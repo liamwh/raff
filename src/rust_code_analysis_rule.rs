@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::error::{RaffError, Result};
 use prettytable::{format as pt_format, Attr, Cell, Row, Table};
 use serde::{Deserialize, Serialize};
 // use std::fmt::Write; // No longer needed for HTML buffer
@@ -207,13 +207,7 @@ impl RustCodeAnalysisRule {
             args.language
         );
 
-        let file_path_args = discover_and_filter_files(&analysis_path, &args.language)
-            .with_context(|| {
-                format!(
-                    "Failed to discover source files in {}",
-                    analysis_path.display()
-                )
-            })?;
+        let file_path_args = discover_and_filter_files(&analysis_path, &args.language)?;
 
         if file_path_args.is_empty() {
             println!(
@@ -258,21 +252,27 @@ impl RustCodeAnalysisRule {
 
         let output = command.output().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                anyhow::anyhow!(
+                RaffError::analysis_error(
+                    "rust_code_analysis",
                     "rust-code-analysis-cli not found. Please ensure it is installed and in your PATH."
                 )
             } else {
-                anyhow::anyhow!("Failed to execute rust-code-analysis-cli: {}", e)
+                RaffError::analysis_error(
+                    "rust_code_analysis",
+                    format!("Failed to execute rust-code-analysis-cli: {}", e)
+                )
             }
         })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             tracing::error!("rust-code-analysis-cli failed. Stderr:\n{}", stderr);
-            return Err(anyhow::anyhow!(
-                "rust-code-analysis-cli exited with error code {}:\n{}",
-                output.status,
-                stderr
+            return Err(RaffError::analysis_error(
+                "rust_code_analysis",
+                format!(
+                    "rust-code-analysis-cli exited with error code {}:\n{}",
+                    output.status, stderr
+                ),
             ));
         }
 
@@ -624,10 +624,10 @@ fn get_extension_for_language(language: &str) -> Option<&str> {
 #[instrument]
 fn discover_and_filter_files(root_dir: &PathBuf, language: &str) -> Result<Vec<String>> {
     if !root_dir.exists() {
-        return Err(anyhow::anyhow!(
+        return Err(RaffError::invalid_input(format!(
             "Root path not found: {}",
             root_dir.display()
-        ));
+        )));
     }
 
     // If a specific file extension is known for the language, walk the directory and find all matching files.
@@ -676,9 +676,9 @@ fn discover_and_filter_files(root_dir: &PathBuf, language: &str) -> Result<Vec<S
         Ok(file_path_args)
     } else {
         // Fallback for languages without a specified extension: pass the path directly to the CLI tool.
-        let path_str = root_dir
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("Path contains invalid Unicode: {:?}", root_dir))?;
+        let path_str = root_dir.to_str().ok_or_else(|| {
+            RaffError::invalid_input(format!("Path contains invalid Unicode: {:?}", root_dir))
+        })?;
         Ok(vec!["-p".to_string(), path_str.to_string()])
     }
 }

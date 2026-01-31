@@ -1,7 +1,8 @@
+use raff_core::error::Result;
 use raff_core::{ContributorReportArgs, ContributorReportOutputFormat, ContributorReportRule};
 use std::path::PathBuf;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     let args = ContributorReportArgs {
         path: PathBuf::from("."),
         since: None,

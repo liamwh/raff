@@ -1,7 +1,8 @@
+use raff_core::error::Result;
 use raff_core::{VolatilityArgs, VolatilityOutputFormat, VolatilityRule};
 use std::path::PathBuf;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     let args = VolatilityArgs {
         path: PathBuf::from("."),
         alpha: 0.01,

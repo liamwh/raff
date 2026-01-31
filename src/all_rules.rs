@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::error::Result;
 use maud::Markup;
 use serde::Serialize;
 
@@ -297,10 +297,21 @@ mod tests {
 
     #[test]
     fn test_all_report_data_with_results_stores_provided_values() {
-        let sc_result: Result<StatementCountData> = Err(anyhow::anyhow!("test error"));
-        let vol_result: Result<VolatilityData> = Err(anyhow::anyhow!("volatility error"));
-        let coup_result: Result<CouplingData> = Err(anyhow::anyhow!("coupling error"));
-        let rca_result: Result<RustCodeAnalysisData> = Err(anyhow::anyhow!("rca error"));
+        let sc_result: Result<StatementCountData> = Err(crate::error::RaffError::analysis_error(
+            "statement_count",
+            "test error",
+        ));
+        let vol_result: Result<VolatilityData> = Err(crate::error::RaffError::analysis_error(
+            "volatility",
+            "volatility error",
+        ));
+        let coup_result: Result<CouplingData> = Err(crate::error::RaffError::analysis_error(
+            "coupling",
+            "coupling error",
+        ));
+        let rca_result: Result<RustCodeAnalysisData> = Err(
+            crate::error::RaffError::analysis_error("rust_code_analysis", "rca error"),
+        );
 
         let data = AllReportData::with_results(
             Some(sc_result),

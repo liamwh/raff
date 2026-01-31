@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 
-use anyhow::{Context, Result};
+use crate::error::{RaffError, Result};
 use chrono::{DateTime, Utc};
 use git2::{Commit, Repository};
 use maud::{html, Markup};
@@ -52,7 +52,7 @@ impl ContributorReportRule {
 
     pub fn run(&self, args: &ContributorReportArgs) -> Result<()> {
         let repo = Repository::open(&args.path)
-            .with_context(|| format!("Failed to open repository at {:?}", &args.path))?;
+            .map_err(|_e| RaffError::git_error_with_repo("open repository", args.path.clone()))?;
         let mut revwalk = repo.revwalk()?;
         revwalk.push_head()?;
 
@@ -527,7 +527,8 @@ mod tests {
         let json = serde_json::to_string(&original);
         assert!(json.is_ok(), "ContributorStats should serialize to JSON");
 
-        let deserialized: Result<ContributorStats, _> = serde_json::from_str(&json.unwrap());
+        let deserialized: std::result::Result<ContributorStats, _> =
+            serde_json::from_str(&json.unwrap());
         assert!(
             deserialized.is_ok(),
             "JSON should deserialize back to ContributorStats"
