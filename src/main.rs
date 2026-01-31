@@ -2,8 +2,8 @@
 
 use clap::Parser;
 use raff_core::{
-    all_rules, error::Result, load_config, Cli, Commands, ContributorReportRule, CouplingRule,
-    RustCodeAnalysisRule, StatementCountRule, VolatilityRule,
+    all_rules, error::Result, load_config, CacheManager, Cli, Commands, ContributorReportRule,
+    CouplingRule, RustCodeAnalysisRule, StatementCountRule, VolatilityRule,
 };
 use std::process::exit;
 
@@ -31,6 +31,17 @@ fn main() -> Result<()> {
 
     let cli_args = Cli::parse();
     tracing::debug!("Parsed CLI arguments: {:?}", cli_args);
+
+    // Handle cache CLI flags
+    let mut cache_manager = CacheManager::new()?;
+    if cli_args.clear_cache {
+        tracing::info!("Clearing cache as requested by --clear-cache flag");
+        cache_manager.clear()?;
+    }
+    if cli_args.no_cache {
+        tracing::info!("Caching disabled for this run as requested by --no-cache flag");
+        cache_manager.set_enabled(false);
+    }
 
     // Load configuration file if specified or discover from default locations
     let config_result = load_config(cli_args.config.as_deref())?;

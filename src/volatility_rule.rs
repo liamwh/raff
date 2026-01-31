@@ -73,6 +73,7 @@
 //! - No crates (Cargo.toml files) are found
 //! - Git operations fail (e.g., corrupted repository)
 
+use bincode;
 use chrono::{DateTime, NaiveDate, TimeZone, Utc}; // For parsing --since date
 use git2::{DiffOptions, Repository, Sort, TreeWalkMode, TreeWalkResult};
 use maud::{html, Markup};
@@ -87,6 +88,7 @@ use toml::Value as TomlValue;
 // Added import for tracing
 use walkdir::WalkDir; // For recursively finding Cargo.toml files // For parsing Cargo.toml
 
+use crate::cache::{CacheEntry, CacheKey, CacheManager};
 use crate::cli::{VolatilityArgs, VolatilityOutputFormat}; // Ensure VolatilityOutputFormat is imported
 use crate::error::{RaffError, Result};
 use crate::html_utils; // Import the new HTML utilities
@@ -144,7 +146,7 @@ struct CrateVolatilityDataForOutput<'a> {
     normalized_score: Option<f64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct VolatilityData {
     pub crate_stats_map: CrateStatsMap,
     pub normalize: bool,
@@ -724,14 +726,57 @@ impl VolatilityRule {
     pub fn analyze(&self, args: &VolatilityArgs) -> Result<VolatilityData> {
         let analysis_path = &args.path;
         let analysis_path_canonical = analysis_path.canonicalize()?;
-        tracing::info!(path = %analysis_path_canonical.display(), "Running volatility analysis on repository");
 
+        // Open repository first to get HEAD hash for cache key
         let repo = Repository::open(&analysis_path_canonical).map_err(|e| {
             RaffError::git_error_with_repo(
                 format!("open Git repository: {}", e),
                 analysis_path_canonical.clone(),
             )
         })?;
+
+        // Get HEAD commit hash for cache key
+        let head_hash = repo
+            .head()
+            .and_then(|head| {
+                head.target()
+                    .ok_or_else(|| git2::Error::from_str("No HEAD target"))
+            })
+            .map(|oid| oid.to_string())
+            .ok();
+
+        // Build cache parameters from analysis arguments
+        let mut cache_params = vec![
+            ("alpha".to_string(), args.alpha.to_string()),
+            ("normalize".to_string(), args.normalize.to_string()),
+        ];
+        if let Some(ref since) = args.since {
+            cache_params.push(("since".to_string(), since.clone()));
+        }
+        if args.skip_merges {
+            cache_params.push(("skip_merges".to_string(), "true".to_string()));
+        }
+
+        // Create cache manager and try to get cached result
+        let cache_manager = CacheManager::new()?;
+        let cache_key = CacheKey::new(
+            format!("volatility:{}", analysis_path_canonical.display()),
+            head_hash,
+            cache_params,
+        );
+
+        if let Some(cached_entry) = cache_manager.get(&cache_key)? {
+            tracing::info!("Using cached volatility analysis result");
+            let cached_data: VolatilityData =
+                bincode::deserialize(&cached_entry.data).map_err(|e| {
+                    RaffError::parse_error(format!(
+                        "Failed to deserialize cached volatility data: {}",
+                        e
+                    ))
+                })?;
+            return Ok(cached_data);
+        }
+        tracing::info!(path = %analysis_path_canonical.display(), "Running volatility analysis on repository");
         tracing::debug!("Successfully opened Git repository.");
 
         let mut crate_stats_map = self.discover_crates_and_init_stats(&analysis_path_canonical)?;
@@ -888,12 +933,24 @@ impl VolatilityRule {
             }
         }
 
-        Ok(VolatilityData {
+        let result = VolatilityData {
             crate_stats_map,
             normalize: args.normalize,
             alpha: args.alpha,
             analysis_path: analysis_path_canonical,
-        })
+        };
+
+        // Cache the result
+        let serialized_data = bincode::serialize(&result).map_err(|e| {
+            RaffError::parse_error(format!(
+                "Failed to serialize volatility data for caching: {}",
+                e
+            ))
+        })?;
+        let cache_entry = CacheEntry::new(serialized_data);
+        cache_manager.put(&cache_key, cache_entry)?;
+
+        Ok(result)
     }
 }
 

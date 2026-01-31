@@ -46,13 +46,15 @@
 //! - No Rust statements are found in any files
 //! - An error occurs during AST parsing
 
+use bincode;
 use maud::html;
 use maud::Markup;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::PathBuf};
 use syn::visit::Visit;
 use syn::File as SynFile;
 
+use crate::cache::{CacheEntry, CacheKey, CacheManager};
 use crate::cli::{StatementCountArgs, StatementCountOutputFormat}; // Import the specific args struct
 use crate::counter::StmtCounter; // Assuming counter.rs is at crate::counter
 use crate::error::{RaffError, Result};
@@ -64,7 +66,7 @@ use crate::reporting::print_report; // Assuming reporting.rs is at crate::report
 #[derive(Debug, Default)]
 pub struct StatementCountRule;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct StatementCountData {
     pub component_stats: HashMap<String, (usize, usize)>,
     pub grand_total: usize,
@@ -137,6 +139,27 @@ impl StatementCountRule {
         let threshold = args.threshold;
         let analysis_path = &args.path;
 
+        // Create cache key from analysis path and threshold
+        let cache_manager = CacheManager::new()?;
+        let cache_key = CacheKey::new(
+            format!("statement_count:{}", analysis_path.display()),
+            None, // No git state for statement count
+            vec![("threshold".to_string(), threshold.to_string())],
+        );
+
+        // Try to get cached result
+        if let Some(cached_entry) = cache_manager.get(&cache_key)? {
+            tracing::info!("Using cached statement count analysis result");
+            let cached_data: StatementCountData = bincode::deserialize(&cached_entry.data)
+                .map_err(|e| {
+                    RaffError::parse_error(format!(
+                        "Failed to deserialize cached statement count data: {}",
+                        e
+                    ))
+                })?;
+            return Ok(cached_data);
+        }
+
         if !analysis_path.exists() {
             return Err(RaffError::invalid_input_with_arg(
                 "Path not found",
@@ -202,12 +225,24 @@ impl StatementCountRule {
             ));
         }
 
-        Ok(StatementCountData {
+        let result = StatementCountData {
             component_stats,
             grand_total,
             threshold,
             analysis_path: analysis_path.to_path_buf(),
-        })
+        };
+
+        // Cache the result
+        let serialized_data = bincode::serialize(&result).map_err(|e| {
+            RaffError::parse_error(format!(
+                "Failed to serialize statement count data for caching: {}",
+                e
+            ))
+        })?;
+        let cache_entry = CacheEntry::new(serialized_data);
+        cache_manager.put(&cache_key, cache_entry)?;
+
+        Ok(result)
     }
 
     pub fn render_statement_count_html_body(&self, data: &StatementCountData) -> Result<Markup> {

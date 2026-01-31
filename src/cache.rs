@@ -37,7 +37,7 @@
 //! let key = CacheKey::new(
 //!     "abc123".to_string(),
 //!     Some("def456".to_string()),
-//!     vec![("threshold", "10")],
+//!     vec![("threshold".to_string(), "10".to_string())],
 //! );
 //!
 //! // Try to get cached result
@@ -45,8 +45,9 @@
 //!     println!("Cache hit: {:?}", entry);
 //! } else {
 //!     // Perform analysis and cache result
-//!     let entry = CacheEntry::new(serde_json::json!({"result": "data"}));
-//!     cache_manager.put(key.clone(), entry)?;
+//!     let data = b"result data".to_vec();
+//!     let entry = CacheEntry::new(data);
+//!     cache_manager.put(&key, entry)?;
 //! }
 //! # Ok(())
 //! # }
