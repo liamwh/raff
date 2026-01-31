@@ -204,7 +204,11 @@ mod tests {
     }
 
     /// Helper function to create test StatementCountArgs.
-    fn create_test_statement_count_args(path: &str, threshold: usize) -> crate::cli::StatementCountArgs {
+    #[allow(dead_code)]
+    fn create_test_statement_count_args(
+        path: &str,
+        threshold: usize,
+    ) -> crate::cli::StatementCountArgs {
         crate::cli::StatementCountArgs {
             path: PathBuf::from(path),
             threshold,
@@ -213,6 +217,7 @@ mod tests {
     }
 
     /// Helper function to create test VolatilityArgs.
+    #[allow(dead_code)]
     fn create_test_volatility_args(path: &str, alpha: f64) -> crate::cli::VolatilityArgs {
         crate::cli::VolatilityArgs {
             path: PathBuf::from(path),
@@ -225,6 +230,7 @@ mod tests {
     }
 
     /// Helper function to create test CouplingArgs.
+    #[allow(dead_code)]
     fn create_test_coupling_args(path: &str) -> crate::cli::CouplingArgs {
         use crate::cli::{CouplingGranularity, CouplingOutputFormat};
         crate::cli::CouplingArgs {
@@ -235,6 +241,7 @@ mod tests {
     }
 
     /// Helper function to create test RustCodeAnalysisArgs.
+    #[allow(dead_code)]
     fn create_test_rca_args(path: &str) -> crate::cli::RustCodeAnalysisArgs {
         crate::cli::RustCodeAnalysisArgs {
             path: PathBuf::from(path),
@@ -420,7 +427,8 @@ mod tests {
         };
 
         assert_eq!(
-            sc_args.path, PathBuf::from("/test/path"),
+            sc_args.path,
+            PathBuf::from("/test/path"),
             "StatementCountArgs path should match AllArgs path"
         );
         assert_eq!(
@@ -428,7 +436,10 @@ mod tests {
             "StatementCountArgs threshold should match AllArgs sc_threshold"
         );
         assert!(
-            matches!(sc_args.output, crate::cli::StatementCountOutputFormat::Table),
+            matches!(
+                sc_args.output,
+                crate::cli::StatementCountOutputFormat::Table
+            ),
             "StatementCountArgs output should be Table"
         );
     }
@@ -447,7 +458,8 @@ mod tests {
         };
 
         assert_eq!(
-            vol_args.path, PathBuf::from("/test/path"),
+            vol_args.path,
+            PathBuf::from("/test/path"),
             "VolatilityArgs path should match AllArgs path"
         );
         assert_eq!(
@@ -458,12 +470,12 @@ mod tests {
             vol_args.since, None,
             "VolatilityArgs since should match AllArgs vol_since"
         );
-        assert_eq!(
-            vol_args.normalize, false,
+        assert!(
+            !vol_args.normalize,
             "VolatilityArgs normalize should match AllArgs vol_normalize"
         );
-        assert_eq!(
-            vol_args.skip_merges, false,
+        assert!(
+            !vol_args.skip_merges,
             "VolatilityArgs skip_merges should match AllArgs vol_skip_merges"
         );
     }
@@ -480,7 +492,8 @@ mod tests {
         };
 
         assert_eq!(
-            coup_args.path, PathBuf::from("/test/path"),
+            coup_args.path,
+            PathBuf::from("/test/path"),
             "CouplingArgs path should match AllArgs path"
         );
         assert!(
@@ -507,19 +520,21 @@ mod tests {
         };
 
         assert_eq!(
-            rca_args.path, PathBuf::from("/test/path"),
+            rca_args.path,
+            PathBuf::from("/test/path"),
             "RustCodeAnalysisArgs path should match AllArgs path"
         );
         assert_eq!(
-            rca_args.extra_flags.len(), 0,
+            rca_args.extra_flags.len(),
+            0,
             "RustCodeAnalysisArgs extra_flags should match AllArgs rca_extra_flags"
         );
         assert_eq!(
             rca_args.jobs, 1,
             "RustCodeAnalysisArgs jobs should match AllArgs rca_jobs"
         );
-        assert_eq!(
-            rca_args.metrics, true,
+        assert!(
+            rca_args.metrics,
             "RustCodeAnalysisArgs metrics should match AllArgs rca_metrics"
         );
         assert_eq!(
@@ -544,7 +559,8 @@ mod tests {
         };
 
         assert_eq!(
-            vol_args.since, Some("2023-01-01".to_string()),
+            vol_args.since,
+            Some("2023-01-01".to_string()),
             "VolatilityArgs since should match AllArgs vol_since when set"
         );
     }
@@ -563,8 +579,8 @@ mod tests {
             output: crate::cli::VolatilityOutputFormat::Table,
         };
 
-        assert_eq!(
-            vol_args.normalize, true,
+        assert!(
+            vol_args.normalize,
             "VolatilityArgs normalize should match AllArgs vol_normalize when true"
         );
     }
@@ -584,11 +600,13 @@ mod tests {
         };
 
         assert_eq!(
-            rca_args.extra_flags.len(), 2,
+            rca_args.extra_flags.len(),
+            2,
             "RustCodeAnalysisArgs extra_flags should contain the extra flags"
         );
         assert_eq!(
-            rca_args.extra_flags, vec!["--flag1".to_string(), "--flag2".to_string()],
+            rca_args.extra_flags,
+            vec!["--flag1".to_string(), "--flag2".to_string()],
             "RustCodeAnalysisArgs extra_flags should match AllArgs rca_extra_flags"
         );
     }
@@ -651,7 +669,14 @@ mod tests {
             errors,
         };
 
-        assert_eq!(report_data.errors.len(), 1, "errors vector should contain 1 error");
-        assert_eq!(report_data.errors[0], "test error", "error message should match");
+        assert_eq!(
+            report_data.errors.len(),
+            1,
+            "errors vector should contain 1 error"
+        );
+        assert_eq!(
+            report_data.errors[0], "test error",
+            "error message should match"
+        );
     }
 }

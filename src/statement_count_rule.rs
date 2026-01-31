@@ -307,9 +307,7 @@ pub fn func_b() {
 
     #[test]
     fn test_statement_count_rule_default_creates_instance() {
-        let rule = StatementCountRule::default();
-        // Just verify the rule can be created; struct has no fields to check
-        let _ = rule;
+        let _rule = StatementCountRule;
     }
 
     #[test]

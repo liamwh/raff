@@ -285,9 +285,8 @@ mod tests {
 
     #[test]
     fn test_contributor_report_rule_default_creates_instance() {
-        let rule = ContributorReportRule::default();
+        let _rule = ContributorReportRule;
         // Just verify it can be created - it's a zero-sized struct
-        let _ = &rule;
     }
 
     #[test]

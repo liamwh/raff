@@ -110,7 +110,7 @@ pub enum CouplingOutputFormat {
 }
 
 /// Defines the granularity level for the coupling report.
-#[derive(ValueEnum, Clone, Debug, Default, Serialize)]
+#[derive(ValueEnum, Clone, Debug, Default, Serialize, PartialEq, Eq)]
 pub enum CouplingGranularity {
     /// Show both crate-level and module-level coupling.
     #[default]

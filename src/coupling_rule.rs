@@ -56,7 +56,7 @@ struct CrateLevelAnalysisResult {
     workspace_member_ids: HashSet<String>,
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CrateCoupling {
     pub name: String,
     pub ce: usize,
@@ -65,7 +65,7 @@ pub struct CrateCoupling {
     pub dependencies: HashSet<String>,
 }
 
-#[derive(Serialize, Debug, Default, Clone)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct ModuleCoupling {
     pub path: String,
     pub ce_m: usize,
@@ -1047,5 +1047,561 @@ impl<'a> ModuleDependencyVisitor<'a> {
             known_mod_path == &query_prefix
                 || known_mod_path.starts_with(&(query_prefix.clone() + "::"))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    // Constructor tests
+    #[test]
+    fn test_coupling_rule_new_creates_instance() {
+        let rule = CouplingRule::new();
+        // CouplingRule is a zero-sized struct, so we just verify it can be created
+        let _ = rule;
+    }
+
+    #[test]
+    fn test_coupling_rule_default_creates_instance() {
+        let _rule = CouplingRule;
+    }
+
+    // Data structure tests
+    #[test]
+    fn test_crate_coupling_new_with_default_fields() {
+        let coupling = CrateCoupling {
+            name: "test_crate".to_string(),
+            ce: 5,
+            ca: 3,
+            modules: Vec::new(),
+            dependencies: HashSet::new(),
+        };
+        assert_eq!(coupling.name, "test_crate");
+        assert_eq!(coupling.ce, 5);
+        assert_eq!(coupling.ca, 3);
+        assert!(coupling.modules.is_empty());
+        assert!(coupling.dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_crate_coupling_with_modules() {
+        let module = ModuleCoupling {
+            path: "test::module".to_string(),
+            ce_m: 2,
+            ca_m: 1,
+            module_dependencies: HashSet::new(),
+        };
+        let coupling = CrateCoupling {
+            name: "test_crate".to_string(),
+            ce: 5,
+            ca: 3,
+            modules: vec![module.clone()],
+            dependencies: HashSet::new(),
+        };
+        assert_eq!(coupling.modules.len(), 1);
+        assert_eq!(coupling.modules[0].path, "test::module");
+    }
+
+    #[test]
+    fn test_crate_coupling_with_dependencies() {
+        let mut deps = HashSet::new();
+        deps.insert("dep1".to_string());
+        deps.insert("dep2".to_string());
+        let coupling = CrateCoupling {
+            name: "test_crate".to_string(),
+            ce: 2,
+            ca: 0,
+            modules: Vec::new(),
+            dependencies: deps.clone(),
+        };
+        assert_eq!(coupling.dependencies.len(), 2);
+        assert!(coupling.dependencies.contains("dep1"));
+        assert!(coupling.dependencies.contains("dep2"));
+    }
+
+    #[test]
+    fn test_module_coupling_default_creates_empty_instance() {
+        let coupling = ModuleCoupling::default();
+        assert_eq!(coupling.path, "");
+        assert_eq!(coupling.ce_m, 0);
+        assert_eq!(coupling.ca_m, 0);
+        assert!(coupling.module_dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_module_coupling_with_values() {
+        let mut deps = HashSet::new();
+        deps.insert("crate::other".to_string());
+        let coupling = ModuleCoupling {
+            path: "crate::test_module".to_string(),
+            ce_m: 3,
+            ca_m: 2,
+            module_dependencies: deps.clone(),
+        };
+        assert_eq!(coupling.path, "crate::test_module");
+        assert_eq!(coupling.ce_m, 3);
+        assert_eq!(coupling.ca_m, 2);
+        assert_eq!(coupling.module_dependencies.len(), 1);
+    }
+
+    #[test]
+    fn test_coupling_data_new() {
+        let data = CouplingData {
+            crates: Vec::new(),
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test/path"),
+        };
+        assert!(data.crates.is_empty());
+        assert_eq!(data.granularity, CouplingGranularity::Crate);
+        assert_eq!(data.analysis_path, PathBuf::from("/test/path"));
+    }
+
+    // Serialization tests
+    #[test]
+    fn test_crate_coupling_is_serializable() {
+        let coupling = CrateCoupling {
+            name: "test_crate".to_string(),
+            ce: 5,
+            ca: 3,
+            modules: vec![ModuleCoupling {
+                path: "test::module".to_string(),
+                ce_m: 2,
+                ca_m: 1,
+                module_dependencies: HashSet::new(),
+            }],
+            dependencies: {
+                let mut deps = HashSet::new();
+                deps.insert("dep1".to_string());
+                deps
+            },
+        };
+        let json = serde_json::to_string(&coupling);
+        assert!(json.is_ok(), "CrateCoupling should be serializable to JSON");
+    }
+
+    #[test]
+    fn test_module_coupling_is_serializable() {
+        let coupling = ModuleCoupling {
+            path: "test::module".to_string(),
+            ce_m: 2,
+            ca_m: 1,
+            module_dependencies: {
+                let mut deps = HashSet::new();
+                deps.insert("crate::other".to_string());
+                deps
+            },
+        };
+        let json = serde_json::to_string(&coupling);
+        assert!(
+            json.is_ok(),
+            "ModuleCoupling should be serializable to JSON"
+        );
+    }
+
+    #[test]
+    fn test_coupling_data_is_serializable() {
+        let data = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "test_crate".to_string(),
+                ce: 5,
+                ca: 3,
+                modules: Vec::new(),
+                dependencies: HashSet::new(),
+            }],
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test/path"),
+        };
+        let json = serde_json::to_string(&data);
+        assert!(json.is_ok(), "CouplingData should be serializable to JSON");
+    }
+
+    #[test]
+    fn test_crate_coupling_json_roundtrip() {
+        let original = CrateCoupling {
+            name: "test_crate".to_string(),
+            ce: 5,
+            ca: 3,
+            modules: vec![ModuleCoupling {
+                path: "test::module".to_string(),
+                ce_m: 2,
+                ca_m: 1,
+                module_dependencies: {
+                    let mut deps = HashSet::new();
+                    deps.insert("crate::other".to_string());
+                    deps
+                },
+            }],
+            dependencies: {
+                let mut deps = HashSet::new();
+                deps.insert("dep1".to_string());
+                deps.insert("dep2".to_string());
+                deps
+            },
+        };
+        let json = serde_json::to_string(&original).expect("Serialization should succeed");
+        let deserialized: CrateCoupling =
+            serde_json::from_str(&json).expect("Deserialization should succeed");
+        assert_eq!(deserialized.name, original.name);
+        assert_eq!(deserialized.ce, original.ce);
+        assert_eq!(deserialized.ca, original.ca);
+        assert_eq!(deserialized.modules.len(), original.modules.len());
+        assert_eq!(deserialized.dependencies.len(), original.dependencies.len());
+    }
+
+    #[test]
+    fn test_coupling_data_yaml_serialization() {
+        let data = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "test_crate".to_string(),
+                ce: 5,
+                ca: 3,
+                modules: Vec::new(),
+                dependencies: HashSet::new(),
+            }],
+            granularity: CouplingGranularity::Module,
+            analysis_path: PathBuf::from("/test/path"),
+        };
+        let yaml = serde_yaml::to_string(&data);
+        assert!(yaml.is_ok(), "CouplingData should be serializable to YAML");
+    }
+
+    // Pure function tests
+    #[test]
+    fn test_get_dot_color_with_zero_max_value() {
+        let color = CouplingRule::get_dot_color(100.0, 0.0);
+        assert_eq!(color, "0.33,1.0,0.7".to_string());
+    }
+
+    #[test]
+    fn test_get_dot_color_with_zero_value() {
+        let color = CouplingRule::get_dot_color(0.0, 100.0);
+        assert_eq!(color, "0.33,1.0,0.5".to_string());
+    }
+
+    #[test]
+    fn test_get_dot_color_with_half_max_value() {
+        let color = CouplingRule::get_dot_color(50.0, 100.0);
+        assert_eq!(color, "0.17,1.0,0.5".to_string());
+    }
+
+    #[test]
+    fn test_get_dot_color_with_max_value() {
+        let color = CouplingRule::get_dot_color(100.0, 100.0);
+        assert_eq!(color, "0.00,1.0,0.5".to_string());
+    }
+
+    #[test]
+    fn test_get_dot_color_clamps_high_values() {
+        let color = CouplingRule::get_dot_color(150.0, 100.0);
+        // Should be clamped to 1.0, resulting in red
+        assert_eq!(color, "0.00,1.0,0.5".to_string());
+    }
+
+    #[test]
+    fn test_get_dot_color_green_for_low_coupling() {
+        let color = CouplingRule::get_dot_color(1.0, 100.0);
+        // Should be close to green
+        assert!(color.starts_with("0.3"));
+    }
+
+    #[test]
+    fn test_get_dot_color_red_for_high_coupling() {
+        let color = CouplingRule::get_dot_color(99.0, 100.0);
+        // Should be close to red
+        assert!(color.starts_with("0.0") || color.starts_with("0.1"));
+    }
+
+    // HTML rendering tests
+    #[test]
+    fn test_render_coupling_html_body_produces_valid_markup() {
+        let rule = CouplingRule::new();
+        let report = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "test_crate".to_string(),
+                ce: 5,
+                ca: 3,
+                modules: Vec::new(),
+                dependencies: {
+                    let mut deps = HashSet::new();
+                    deps.insert("dep1".to_string());
+                    deps
+                },
+            }],
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test/path"),
+        };
+        let result = rule.render_coupling_html_body(&report);
+        assert!(result.is_ok(), "HTML rendering should succeed");
+        let markup = result.unwrap();
+        let html_string = markup.into_string();
+        assert!(
+            html_string.contains("<table"),
+            "Should contain a table element"
+        );
+        assert!(
+            html_string.contains("test_crate"),
+            "Should contain crate name"
+        );
+    }
+
+    #[test]
+    fn test_render_coupling_html_body_with_module_granularity() {
+        let rule = CouplingRule::new();
+        let report = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "test_crate".to_string(),
+                ce: 5,
+                ca: 3,
+                modules: vec![ModuleCoupling {
+                    path: "test_module".to_string(),
+                    ce_m: 2,
+                    ca_m: 1,
+                    module_dependencies: HashSet::new(),
+                }],
+                dependencies: HashSet::new(),
+            }],
+            granularity: CouplingGranularity::Module,
+            analysis_path: PathBuf::from("/test/path"),
+        };
+        let result = rule.render_coupling_html_body(&report);
+        assert!(result.is_ok());
+        let html_string = result.unwrap().into_string();
+        assert!(html_string.contains("test_module"));
+    }
+
+    #[test]
+    fn test_render_coupling_html_body_with_both_granularity() {
+        let rule = CouplingRule::new();
+        let report = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "test_crate".to_string(),
+                ce: 5,
+                ca: 3,
+                modules: vec![ModuleCoupling {
+                    path: "test_module".to_string(),
+                    ce_m: 2,
+                    ca_m: 1,
+                    module_dependencies: HashSet::new(),
+                }],
+                dependencies: HashSet::new(),
+            }],
+            granularity: CouplingGranularity::Both,
+            analysis_path: PathBuf::from("/test/path"),
+        };
+        let result = rule.render_coupling_html_body(&report);
+        assert!(result.is_ok());
+        let html_string = result.unwrap().into_string();
+        // Should have both crate and module level headers
+        assert!(html_string.contains("Crate Level"));
+        assert!(html_string.contains("Module Level"));
+    }
+
+    #[test]
+    fn test_render_coupling_html_body_with_empty_crates() {
+        let rule = CouplingRule::new();
+        let report = CouplingData {
+            crates: Vec::new(),
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test/path"),
+        };
+        let result = rule.render_coupling_html_body(&report);
+        assert!(result.is_ok());
+    }
+
+    // DOT generation tests
+    #[test]
+    fn test_generate_crate_dot_produces_valid_graph() {
+        let rule = CouplingRule::new();
+        let report = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "test_crate".to_string(),
+                ce: 5,
+                ca: 3,
+                modules: Vec::new(),
+                dependencies: {
+                    let mut deps = HashSet::new();
+                    deps.insert("other_crate".to_string());
+                    deps
+                },
+            }],
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test/path"),
+        };
+        let result = rule.generate_crate_dot(&report);
+        assert!(result.is_ok(), "DOT generation should succeed");
+        let dot = result.unwrap();
+        assert!(dot.contains("digraph CrateCoupling"), "Should be a digraph");
+        assert!(dot.contains("test_crate"), "Should contain crate name");
+        assert!(dot.contains("other_crate"), "Should contain dependency");
+    }
+
+    #[test]
+    fn test_generate_crate_dot_with_empty_crates() {
+        let rule = CouplingRule::new();
+        let report = CouplingData {
+            crates: Vec::new(),
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test/path"),
+        };
+        let result = rule.generate_crate_dot(&report);
+        assert!(result.is_ok());
+        let dot = result.unwrap();
+        assert!(dot.contains("digraph CrateCoupling"));
+        assert!(dot.contains("}"));
+    }
+
+    #[test]
+    fn test_generate_module_dot_produces_valid_graph() {
+        let rule = CouplingRule::new();
+        let report = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "test_crate".to_string(),
+                ce: 0,
+                ca: 0,
+                modules: vec![ModuleCoupling {
+                    path: "test_module".to_string(),
+                    ce_m: 1,
+                    ca_m: 0,
+                    module_dependencies: {
+                        let mut deps = HashSet::new();
+                        deps.insert("crate::other_module".to_string());
+                        deps
+                    },
+                }],
+                dependencies: HashSet::new(),
+            }],
+            granularity: CouplingGranularity::Module,
+            analysis_path: PathBuf::from("/test/path"),
+        };
+        let result = rule.generate_module_dot(&report);
+        assert!(result.is_ok(), "Module DOT generation should succeed");
+        let dot = result.unwrap();
+        assert!(dot.contains("digraph ModuleCoupling"));
+        assert!(dot.contains("test_module"));
+    }
+
+    #[test]
+    fn test_generate_module_dot_with_empty_modules() {
+        let rule = CouplingRule::new();
+        let report = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "test_crate".to_string(),
+                ce: 0,
+                ca: 0,
+                modules: Vec::new(),
+                dependencies: HashSet::new(),
+            }],
+            granularity: CouplingGranularity::Module,
+            analysis_path: PathBuf::from("/test/path"),
+        };
+        let result = rule.generate_module_dot(&report);
+        assert!(result.is_ok());
+        let dot = result.unwrap();
+        assert!(dot.contains("digraph ModuleCoupling"));
+        // Should not have subgraphs for empty modules
+        assert!(!dot.contains("subgraph"));
+    }
+
+    // Clone tests for data structures
+    #[test]
+    fn test_module_coupling_clone_creates_independent_copy() {
+        let mut deps = HashSet::new();
+        deps.insert("crate::dep1".to_string());
+        let original = ModuleCoupling {
+            path: "test::module".to_string(),
+            ce_m: 2,
+            ca_m: 1,
+            module_dependencies: deps.clone(),
+        };
+        let cloned = original.clone();
+        assert_eq!(cloned.path, original.path);
+        assert_eq!(cloned.ce_m, original.ce_m);
+        assert_eq!(cloned.ca_m, original.ca_m);
+        assert_eq!(cloned.module_dependencies, original.module_dependencies);
+    }
+
+    #[test]
+    fn test_crate_coupling_clone_creates_independent_copy() {
+        let mut deps = HashSet::new();
+        deps.insert("dep1".to_string());
+        let original = CrateCoupling {
+            name: "test_crate".to_string(),
+            ce: 5,
+            ca: 3,
+            modules: vec![ModuleCoupling {
+                path: "test::module".to_string(),
+                ce_m: 2,
+                ca_m: 1,
+                module_dependencies: HashSet::new(),
+            }],
+            dependencies: deps.clone(),
+        };
+        let cloned = original.clone();
+        assert_eq!(cloned.name, original.name);
+        assert_eq!(cloned.ce, original.ce);
+        assert_eq!(cloned.ca, original.ca);
+        assert_eq!(cloned.modules.len(), original.modules.len());
+        assert_eq!(cloned.dependencies, original.dependencies);
+    }
+
+    // Edge case tests
+    #[test]
+    fn test_crate_coupling_with_zero_coupling() {
+        let coupling = CrateCoupling {
+            name: "stable_crate".to_string(),
+            ce: 0,
+            ca: 0,
+            modules: Vec::new(),
+            dependencies: HashSet::new(),
+        };
+        assert_eq!(coupling.ce, 0);
+        assert_eq!(coupling.ca, 0);
+    }
+
+    #[test]
+    fn test_module_coupling_with_zero_coupling() {
+        let coupling = ModuleCoupling {
+            path: "isolated_module".to_string(),
+            ce_m: 0,
+            ca_m: 0,
+            module_dependencies: HashSet::new(),
+        };
+        assert_eq!(coupling.ce_m, 0);
+        assert_eq!(coupling.ca_m, 0);
+        assert!(coupling.module_dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_coupling_data_with_both_granularity() {
+        let data = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "test_crate".to_string(),
+                ce: 5,
+                ca: 3,
+                modules: vec![ModuleCoupling {
+                    path: "test::module".to_string(),
+                    ce_m: 2,
+                    ca_m: 1,
+                    module_dependencies: HashSet::new(),
+                }],
+                dependencies: HashSet::new(),
+            }],
+            granularity: CouplingGranularity::Both,
+            analysis_path: PathBuf::from("/test"),
+        };
+        assert_eq!(data.granularity, CouplingGranularity::Both);
+        assert_eq!(data.crates.len(), 1);
+        assert_eq!(data.crates[0].modules.len(), 1);
+    }
+
+    // Output format tests
+    #[test]
+    fn test_coupling_granularity_variants() {
+        // Test that all granularity variants can be created
+        let _ = CouplingGranularity::Crate;
+        let _ = CouplingGranularity::Module;
+        let _ = CouplingGranularity::Both;
     }
 }
