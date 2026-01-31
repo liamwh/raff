@@ -23,6 +23,7 @@
 //! - [`rust_code_analysis_rule`] - Wrapper for rust-code-analysis
 //! - [`contributor_report`] - Contributor activity reporting
 //! - [`all_rules`] - Orchestration for running all rules
+//! - [`cache`] - Result caching for improved performance
 //!
 //! ## Usage as a Library
 //!
@@ -62,6 +63,7 @@
 
 // Module declarations
 pub mod all_rules;
+pub mod cache;
 pub mod cli;
 pub mod config;
 pub mod contributor_report;
@@ -95,6 +97,9 @@ pub use crate::config::{
     load_config, load_config_from_path, ContributorReportConfig, CouplingConfig, GeneralConfig,
     RaffConfig, RustCodeAnalysisConfig, StatementCountConfig, VolatilityConfig,
 };
+
+// Cache exports
+pub use crate::cache::{CacheEntry, CacheKey, CacheManager};
 
 // Error exports
 pub use crate::error::{RaffError as Error, Result};
