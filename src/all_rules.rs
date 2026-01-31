@@ -1,3 +1,44 @@
+//! Orchestration for running all analysis rules.
+//!
+//! This module provides [`run_all`], which executes all configured analysis rules
+//! and produces consolidated reports. It is used by the CLI's "all" command to
+//! run multiple analyses in a single invocation.
+//!
+//! # Output Formats
+//!
+//! The consolidated report supports two output formats:
+//!
+//! - **JSON**: Combines results from all rules into a single JSON document
+//! - **HTML**: Generates an HTML report with all analysis results combined
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use raff_core::{run_all, AllArgs, AllOutputFormat};
+//! use std::path::PathBuf;
+//!
+//! # fn main() -> raff_core::error::Result<()> {
+//! let args = AllArgs {
+//!     path: PathBuf::from("./src"),
+//!     output: AllOutputFormat::Json,
+//!     // .. other fields
+//!     sc_threshold: 10,
+//!     vol_alpha: 0.01,
+//!     vol_since: None,
+//!     vol_normalize: false,
+//!     vol_skip_merges: false,
+//!     coup_granularity: raff_core::CouplingGranularity::Both,
+//!     rca_extra_flags: vec![],
+//!     rca_jobs: None,
+//!     rca_metrics: true,
+//!     rca_language: "rust".to_string(),
+//! };
+//!
+//! run_all(&args)?;
+//! # Ok(())
+//! # }
+//! ```
+
 use crate::error::Result;
 use maud::Markup;
 use serde::Serialize;

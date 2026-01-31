@@ -1,3 +1,32 @@
+//! Statement counting for Rust AST nodes.
+//!
+//! This module provides [`StmtCounter`], a visitor that counts statement nodes
+//! in a Rust Abstract Syntax Tree (AST). It is used by the statement count rule
+//! to measure the size of code components.
+//!
+//! # Example
+//!
+//! ```rust
+//! use raff_core::counter::StmtCounter;
+//! use syn::parse_file;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let code = r#"
+//! fn main() {
+//!     let x = 5;
+//!     println!("{}", x);
+//! }
+//! "#;
+//!
+//! let ast = parse_file(code)?;
+//! let mut counter = StmtCounter::new();
+//! counter.visit_file(&ast);
+//!
+//! assert_eq!(counter.count, 2);
+//! # Ok(())
+//! # }
+//! ```
+
 use syn::{visit::Visit, File as SynFile, Stmt};
 
 /// A simple visitor that counts every `syn::Stmt` node in an AST.

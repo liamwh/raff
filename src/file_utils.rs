@@ -1,3 +1,35 @@
+//! File system utilities for code analysis.
+//!
+//! This module provides utility functions for working with file paths and
+//! discovering Rust source files in a directory tree. It includes functions for:
+//!
+//! - Collecting all `.rs` files from a directory recursively
+//! - Converting file paths to Rust namespace notation
+//! - Extracting top-level module names from namespaces
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use raff_core::file_utils::{collect_all_rs, relative_namespace};
+//! use std::path::Path;
+//!
+//! # fn main() -> raff_core::error::Result<()> {
+//! let src_dir = Path::new("./src");
+//! let mut files = Vec::new();
+//!
+//! // Collect all Rust source files
+//! collect_all_rs(src_dir, &mut files)?;
+//!
+//! // Convert a file path to a namespace
+//! let namespace = relative_namespace(
+//!     &Path::new("./src/foo/bar.rs"),
+//!     &Path::new("./src")
+//! );
+//! assert_eq!(namespace, "foo::bar");
+//! # Ok(())
+//! # }
+//! ```
+
 use crate::error::Result;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;

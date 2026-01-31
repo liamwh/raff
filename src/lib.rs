@@ -1,3 +1,65 @@
+//! # Raff - Rust Architecture Fitness Functions
+//!
+//! Raff is a CLI tool and library for measuring and verifying architectural goals
+//! in Rust codebases. It provides fitness functions for:
+//!
+//! - **Statement Counting**: Measures the size of components by counting statements
+//! - **Volatility Analysis**: Tracks how frequently code changes based on git history
+//! - **Coupling Analysis**: Measures dependencies between modules and crates
+//! - **Contributor Reporting**: Reports on contributor activity across the codebase
+//!
+//! ## Architecture
+//!
+//! Raff is organized into several modules:
+//!
+//! - [`cli`] - Command-line argument parsing and configuration
+//! - [`config`] - Configuration file loading and management
+//! - [`error`] - Centralized error types for the crate
+//! - [`counter`] - AST statement counting utilities
+//! - [`file_utils`] - File system operations and path handling
+//! - [`statement_count_rule`] - Statement count analysis rule
+//! - [`volatility_rule`] - Code volatility analysis based on git history
+//! - [`coupling_rule`] - Dependency coupling analysis
+//! - [`rust_code_analysis_rule`] - Wrapper for rust-code-analysis
+//! - [`contributor_report`] - Contributor activity reporting
+//! - [`all_rules`] - Orchestration for running all rules
+//!
+//! ## Usage as a Library
+//!
+//! Raff can be used as a library to programmatically analyze Rust code:
+//!
+//! ```rust,no_run
+//! use raff_core::{StatementCountRule, Cli, StatementCountArgs, StatementCountOutputFormat};
+//! use std::path::PathBuf;
+//!
+//! # fn main() -> raff_core::error::Result<()> {
+//! // Create a new rule instance
+//! let rule = StatementCountRule::new();
+//!
+//! // Configure the analysis
+//! let args = StatementCountArgs {
+//!     path: PathBuf::from("./src"),
+//!     threshold: 1000,
+//!     output: StatementCountOutputFormat::Json,
+//! };
+//!
+//! // Run the analysis
+//! rule.run(&args)?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Configuration
+//!
+//! Raff supports configuration files via [`RaffConfig`]. See the [`config`]
+//! module for details on configuration file format and loading.
+//!
+//! ## Error Handling
+//!
+//! All functions that can fail return [`Result<T>`], which is a type alias for
+//! `std::result::Result<T, RaffError>`. See the [`error`] module for details on
+//! error types and handling.
+
 // Module declarations
 pub mod all_rules;
 pub mod cli;
