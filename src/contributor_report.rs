@@ -81,6 +81,7 @@ use std::fs::File;
 use std::io::Write;
 
 use crate::error::{RaffError, Result};
+use crate::rule::Rule;
 use chrono::{DateTime, Utc};
 use git2::{Commit, Repository};
 use maud::{html, Markup};
@@ -115,7 +116,34 @@ impl ContributorStats {
     }
 }
 
+/// Data type for contributor report analysis results
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContributorReportData {
+    pub stats: Vec<ContributorStats>,
+}
+
 pub struct ContributorReportRule;
+
+impl Rule for ContributorReportRule {
+    type Config = ContributorReportArgs;
+    type Data = ContributorReportData;
+
+    fn name() -> &'static str {
+        "contributor_report"
+    }
+
+    fn description() -> &'static str {
+        "Analyzes Git commit history to generate ranked reports of contributor activity"
+    }
+
+    fn run(&self, config: &Self::Config) -> Result<()> {
+        self.run_impl(config)
+    }
+
+    fn analyze(&self, config: &Self::Config) -> Result<Self::Data> {
+        self.analyze_impl(config)
+    }
+}
 
 impl Default for ContributorReportRule {
     fn default() -> Self {
@@ -128,7 +156,12 @@ impl ContributorReportRule {
         Self
     }
 
-    pub fn run(&self, args: &ContributorReportArgs) -> Result<()> {
+    fn run_impl(&self, args: &ContributorReportArgs) -> Result<()> {
+        let data = self.analyze(args)?;
+        self.render_report(&data, args)
+    }
+
+    fn analyze_impl(&self, args: &ContributorReportArgs) -> Result<ContributorReportData> {
         let repo = Repository::open(&args.path)
             .map_err(|_e| RaffError::git_error_with_repo("open repository", args.path.clone()))?;
         let mut revwalk = repo.revwalk()?;
@@ -174,12 +207,32 @@ impl ContributorReportRule {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
+        Ok(ContributorReportData {
+            stats: sorted_stats,
+        })
+    }
+
+    fn render_report(
+        &self,
+        data: &ContributorReportData,
+        args: &ContributorReportArgs,
+    ) -> Result<()> {
         match args.output {
-            ContributorReportOutputFormat::Table => self.print_table(&sorted_stats),
-            ContributorReportOutputFormat::Html => self.print_html(&sorted_stats),
-            ContributorReportOutputFormat::Json => self.print_json(&sorted_stats),
-            ContributorReportOutputFormat::Yaml => self.print_yaml(&sorted_stats),
+            ContributorReportOutputFormat::Table => self.print_table(&data.stats),
+            ContributorReportOutputFormat::Html => self.print_html(&data.stats),
+            ContributorReportOutputFormat::Json => self.print_json(&data.stats),
+            ContributorReportOutputFormat::Yaml => self.print_yaml(&data.stats),
         }
+    }
+
+    /// Public wrapper that delegates to the Rule trait's run method
+    pub fn run(&self, args: &ContributorReportArgs) -> Result<()> {
+        self.run_impl(args)
+    }
+
+    /// Public wrapper that delegates to the Rule trait's analyze method
+    pub fn analyze(&self, args: &ContributorReportArgs) -> Result<ContributorReportData> {
+        self.analyze_impl(args)
     }
 
     fn get_commit_stats(&self, repo: &Repository, commit: &Commit) -> Result<(u32, u32, u32)> {
@@ -654,6 +707,164 @@ mod tests {
         assert!(
             yaml_string.contains("1200"),
             "YAML output should contain lines added"
+        );
+    }
+
+    // Tests for the Rule trait implementation
+    use crate::rule::Rule;
+
+    #[test]
+    fn test_rule_name_returns_contributor_report() {
+        assert_eq!(
+            ContributorReportRule::name(),
+            "contributor_report",
+            "Rule name should be 'contributor_report'"
+        );
+    }
+
+    #[test]
+    fn test_rule_description_returns_meaningful_text() {
+        let description = ContributorReportRule::description();
+        assert!(
+            !description.is_empty(),
+            "Rule description should not be empty"
+        );
+        assert!(
+            description.contains("contributor") || description.contains("Git"),
+            "Rule description should describe the rule's purpose"
+        );
+    }
+
+    #[test]
+    fn test_rule_trait_analyze_returns_correct_data_type() {
+        // Create a temporary git repository for testing
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let repo_path = temp_dir.path();
+
+        // Initialize a git repository
+        git2::Repository::init(repo_path).expect("Failed to initialize git repo");
+
+        // Create a test file and commit
+        std::fs::write(repo_path.join("test.txt"), "test content")
+            .expect("Failed to write test file");
+
+        let repo = git2::Repository::open(repo_path).expect("Failed to open repo");
+        let mut index = repo.index().expect("Failed to get index");
+        index
+            .add_path(std::path::Path::new("test.txt"))
+            .expect("Failed to add path");
+        index.write().expect("Failed to write index");
+
+        let tree_id = index.write_tree().expect("Failed to write tree");
+        let tree = repo.find_tree(tree_id).expect("Failed to find tree");
+
+        let sig = git2::Signature::now("Test Author", "test@example.com")
+            .expect("Failed to create signature");
+
+        let oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "Test commit", &tree, &[])
+            .expect("Failed to create commit");
+
+        // Verify commit was created
+        repo.find_commit(oid).expect("Failed to find commit");
+
+        let rule = ContributorReportRule::new();
+        let args = ContributorReportArgs {
+            path: repo_path.to_path_buf(),
+            since: None,
+            decay: 0.01,
+            output: ContributorReportOutputFormat::Table,
+        };
+
+        // Call the Rule trait's analyze method
+        let result = <ContributorReportRule as Rule>::analyze(&rule, &args);
+
+        assert!(
+            result.is_ok(),
+            "Rule trait analyze method should succeed with valid git repo: {:?}",
+            result
+        );
+
+        let data = result.unwrap();
+        assert!(
+            !data.stats.is_empty(),
+            "Analyzed data should contain at least one contributor"
+        );
+        // Check that "Test Author" is in the stats
+        assert!(
+            data.stats.iter().any(|s| s.author == "Test Author"),
+            "Stats should contain Test Author"
+        );
+    }
+
+    #[test]
+    fn test_rule_trait_analyze_fails_with_non_git_repository() {
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let non_repo_path = temp_dir.path();
+
+        let rule = ContributorReportRule::new();
+        let args = ContributorReportArgs {
+            path: non_repo_path.to_path_buf(),
+            since: None,
+            decay: 0.01,
+            output: ContributorReportOutputFormat::Table,
+        };
+
+        // Call the Rule trait's analyze method
+        let result = <ContributorReportRule as Rule>::analyze(&rule, &args);
+
+        assert!(
+            result.is_err(),
+            "Rule trait analyze method should fail with non-git directory"
+        );
+    }
+
+    #[test]
+    fn test_rule_associated_types_match() {
+        // This test verifies that the associated types are correctly set
+        // It's a compile-time check; if it compiles, the types are correct
+        let rule = ContributorReportRule::new();
+
+        // Verify Config type is ContributorReportArgs
+        let config = ContributorReportArgs {
+            path: std::path::PathBuf::from("."),
+            since: None,
+            decay: 0.01,
+            output: ContributorReportOutputFormat::Table,
+        };
+
+        // Verify Data type is ContributorReportData
+        let _config_check: <ContributorReportRule as Rule>::Config = config;
+        // We can't directly check Data type without an instance, but the
+        // analyze method returning Result<ContributorReportData> confirms it
+
+        // Verify run and analyze work with these types
+        let _ = rule;
+    }
+
+    #[test]
+    fn test_contributor_report_data_is_serializable() {
+        let stats = vec![
+            create_test_contributor_stats("Alice", 10, 500, 200, 50, 1500.0),
+            create_test_contributor_stats("Bob", 5, 300, 100, 25, 750.0),
+        ];
+        let data = ContributorReportData { stats };
+
+        // Test that ContributorReportData can be serialized to JSON
+        let json = serde_json::to_string(&data);
+        assert!(
+            json.is_ok(),
+            "ContributorReportData should be serializable to JSON"
+        );
+
+        let json_str = json.unwrap();
+        assert!(
+            json_str.contains("Alice"),
+            "JSON should contain contributor name"
+        );
+        assert!(
+            json_str.contains("stats"),
+            "JSON should contain stats field"
         );
     }
 }

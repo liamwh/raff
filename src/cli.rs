@@ -137,7 +137,7 @@ pub enum CouplingGranularity {
 }
 
 /// Arguments for the `coupling` subcommand.
-#[derive(Args, Debug)]
+#[derive(Args, Clone, Debug)]
 pub struct CouplingArgs {
     /// Path to the directory/project to analyze.
     #[clap(long, short, default_value = ".")]
@@ -163,7 +163,7 @@ pub enum RustCodeAnalysisOutputFormat {
 }
 
 /// Arguments for the `rust-code-analysis` subcommand.
-#[derive(Args, Debug)]
+#[derive(Args, Clone, Debug)]
 pub struct RustCodeAnalysisArgs {
     /// Path to the directory/project to analyze.
     #[clap(long, short, default_value = ".")]
@@ -263,7 +263,7 @@ pub enum ContributorReportOutputFormat {
 }
 
 /// Arguments for the `contributor-report` subcommand.
-#[derive(Args, Debug)]
+#[derive(Args, Clone, Debug)]
 pub struct ContributorReportArgs {
     /// Path to the Git repository to analyze.
     #[clap(long, short, default_value = ".")]

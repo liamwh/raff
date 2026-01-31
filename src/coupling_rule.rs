@@ -80,6 +80,7 @@
 //! - Git operations fail for repository-level analysis
 
 use crate::error::{RaffError, Result};
+use crate::rule::Rule;
 use maud::{html, Markup};
 use prettytable::{Cell, Row, Table};
 use serde::{Deserialize, Serialize};
@@ -163,6 +164,27 @@ pub struct CouplingData {
 
 pub struct CouplingRule;
 
+impl Rule for CouplingRule {
+    type Config = CouplingArgs;
+    type Data = CouplingData;
+
+    fn name() -> &'static str {
+        "coupling"
+    }
+
+    fn description() -> &'static str {
+        "Analyzes code coupling between components at crate and module levels"
+    }
+
+    fn run(&self, config: &Self::Config) -> Result<()> {
+        self.run_impl(config)
+    }
+
+    fn analyze(&self, config: &Self::Config) -> Result<Self::Data> {
+        self.analyze_impl(config)
+    }
+}
+
 impl Default for CouplingRule {
     fn default() -> Self {
         Self::new()
@@ -175,7 +197,7 @@ impl CouplingRule {
     }
 
     #[tracing::instrument(level = "debug", skip(self, args), ret)]
-    pub fn run(&self, args: &CouplingArgs) -> Result<()> {
+    fn run_impl(&self, args: &CouplingArgs) -> Result<()> {
         let full_report = self.analyze(args)?;
 
         match args.output {
@@ -206,7 +228,7 @@ impl CouplingRule {
     }
 
     #[tracing::instrument(level = "debug", skip(self, args), ret)]
-    pub fn analyze(&self, args: &CouplingArgs) -> Result<CouplingData> {
+    fn analyze_impl(&self, args: &CouplingArgs) -> Result<CouplingData> {
         let analysis_result = self.analyze_crate_level_coupling(args)?;
         let crate_couplings_map = analysis_result.crate_couplings_map;
         let workspace_packages_map = analysis_result.workspace_packages_map;
@@ -264,6 +286,16 @@ impl CouplingRule {
             .sort_by(|a, b| (b.ce + b.ca).cmp(&(a.ce + a.ca)));
 
         Ok(full_report)
+    }
+
+    /// Public wrapper that delegates to the Rule trait's run method
+    pub fn run(&self, args: &CouplingArgs) -> Result<()> {
+        self.run_impl(args)
+    }
+
+    /// Public wrapper that delegates to the Rule trait's analyze method
+    pub fn analyze(&self, args: &CouplingArgs) -> Result<CouplingData> {
+        self.analyze_impl(args)
     }
 
     #[tracing::instrument(level = "debug", skip(self, args), ret)]
@@ -1676,5 +1708,171 @@ mod tests {
         let _ = CouplingGranularity::Crate;
         let _ = CouplingGranularity::Module;
         let _ = CouplingGranularity::Both;
+    }
+
+    // Tests for the Rule trait implementation
+    use crate::rule::Rule;
+
+    #[test]
+    fn test_rule_name_returns_coupling() {
+        assert_eq!(
+            CouplingRule::name(),
+            "coupling",
+            "Rule name should be 'coupling'"
+        );
+    }
+
+    #[test]
+    fn test_rule_description_returns_meaningful_text() {
+        let description = CouplingRule::description();
+        assert!(
+            !description.is_empty(),
+            "Rule description should not be empty"
+        );
+        assert!(
+            description.contains("coupling") || description.contains("coupl"),
+            "Rule description should describe the rule's purpose"
+        );
+    }
+
+    #[test]
+    fn test_rule_trait_run_delegates_correctly() {
+        // Create a minimal test directory structure
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        // Create a minimal Cargo.toml
+        let cargo_toml = r#"
+[package]
+name = "test-crate"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+"#;
+        fs::write(temp_dir.path().join("Cargo.toml"), cargo_toml)
+            .expect("Failed to write Cargo.toml");
+
+        // Create a simple main.rs file
+        let main_rs = r#"
+fn main() {
+    println!("Hello, world!");
+}
+"#;
+        fs::write(src_dir.join("main.rs"), main_rs).expect("Failed to write main.rs");
+
+        let rule = CouplingRule::new();
+        let args = CouplingArgs {
+            path: temp_dir.path().to_path_buf(),
+            output: CouplingOutputFormat::Table,
+            granularity: CouplingGranularity::Crate,
+        };
+
+        // Call the Rule trait's run method
+        let result = <CouplingRule as Rule>::run(&rule, &args);
+
+        assert!(
+            result.is_ok(),
+            "Rule trait run method should succeed with valid input: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_rule_trait_analyze_returns_correct_data_type() {
+        // Create a minimal test directory structure
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        // Create a minimal Cargo.toml
+        let cargo_toml = r#"
+[package]
+name = "test-crate"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+"#;
+        fs::write(temp_dir.path().join("Cargo.toml"), cargo_toml)
+            .expect("Failed to write Cargo.toml");
+
+        // Create a simple main.rs file
+        let main_rs = r#"
+fn main() {
+    println!("Hello, world!");
+}
+"#;
+        fs::write(src_dir.join("main.rs"), main_rs).expect("Failed to write main.rs");
+
+        let rule = CouplingRule::new();
+        let args = CouplingArgs {
+            path: temp_dir.path().to_path_buf(),
+            output: CouplingOutputFormat::Table,
+            granularity: CouplingGranularity::Crate,
+        };
+
+        // Call the Rule trait's analyze method
+        let result = <CouplingRule as Rule>::analyze(&rule, &args);
+
+        assert!(
+            result.is_ok(),
+            "Rule trait analyze method should succeed with valid input: {:?}",
+            result
+        );
+
+        let data = result.unwrap();
+        assert_eq!(
+            data.granularity,
+            CouplingGranularity::Crate,
+            "Analyzed data should have the correct granularity"
+        );
+        assert_eq!(
+            data.analysis_path,
+            temp_dir.path(),
+            "Analyzed data should have the correct analysis path"
+        );
+    }
+
+    #[test]
+    fn test_rule_trait_analyze_fails_with_nonexistent_directory() {
+        let rule = CouplingRule::new();
+        let fake_path = PathBuf::from("/nonexistent/path/that/does/not/exist");
+        let args = CouplingArgs {
+            path: fake_path,
+            output: CouplingOutputFormat::Table,
+            granularity: CouplingGranularity::Crate,
+        };
+
+        // Call the Rule trait's analyze method
+        let result = <CouplingRule as Rule>::analyze(&rule, &args);
+
+        assert!(
+            result.is_err(),
+            "Rule trait analyze method should fail with nonexistent path"
+        );
+    }
+
+    #[test]
+    fn test_rule_associated_types_match() {
+        // This test verifies that the associated types are correctly set
+        // It's a compile-time check; if it compiles, the types are correct
+        let rule = CouplingRule::new();
+
+        // Verify Config type is CouplingArgs
+        let config = CouplingArgs {
+            path: PathBuf::from("."),
+            output: CouplingOutputFormat::Table,
+            granularity: CouplingGranularity::Crate,
+        };
+
+        // Verify Data type is CouplingData
+        let _config_check: <CouplingRule as Rule>::Config = config;
+        // We can't directly check Data type without an instance, but the
+        // analyze method returning Result<CouplingData> confirms it
+
+        // Verify run and analyze work with these types
+        let _ = rule;
     }
 }

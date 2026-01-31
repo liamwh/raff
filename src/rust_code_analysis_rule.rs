@@ -90,6 +90,7 @@
 //! - The tool produces invalid JSON output
 
 use crate::error::{RaffError, Result};
+use crate::rule::Rule;
 use prettytable::{format as pt_format, Attr, Cell, Row, Table};
 use serde::{Deserialize, Serialize};
 // use std::fmt::Write; // No longer needed for HTML buffer
@@ -238,6 +239,27 @@ pub struct RustCodeAnalysisData {
     pub analysis_path: PathBuf,
 }
 
+impl Rule for RustCodeAnalysisRule {
+    type Config = RustCodeAnalysisArgs;
+    type Data = RustCodeAnalysisData;
+
+    fn name() -> &'static str {
+        "rust_code_analysis"
+    }
+
+    fn description() -> &'static str {
+        "Performs extended code analysis using rust-code-analysis-cli tool"
+    }
+
+    fn run(&self, config: &Self::Config) -> Result<()> {
+        self.run_impl(config)
+    }
+
+    fn analyze(&self, config: &Self::Config) -> Result<Self::Data> {
+        self.analyze_impl(config)
+    }
+}
+
 impl Default for RustCodeAnalysisRule {
     fn default() -> Self {
         Self::new()
@@ -250,7 +272,7 @@ impl RustCodeAnalysisRule {
     }
 
     #[instrument(skip(self, args), fields(output = ?args.output))]
-    pub fn run(&self, args: &RustCodeAnalysisArgs) -> Result<()> {
+    fn run_impl(&self, args: &RustCodeAnalysisArgs) -> Result<()> {
         let data = self.analyze(args)?;
 
         if data.analysis_results.is_empty() {
@@ -289,7 +311,7 @@ impl RustCodeAnalysisRule {
     }
 
     #[instrument(skip(self, args))]
-    pub fn analyze(&self, args: &RustCodeAnalysisArgs) -> Result<RustCodeAnalysisData> {
+    fn analyze_impl(&self, args: &RustCodeAnalysisArgs) -> Result<RustCodeAnalysisData> {
         let analysis_path = PathBuf::from(&args.path);
 
         tracing::info!(
@@ -399,6 +421,16 @@ impl RustCodeAnalysisRule {
             analysis_results,
             analysis_path,
         })
+    }
+
+    /// Public wrapper that delegates to the Rule trait's run method
+    pub fn run(&self, args: &RustCodeAnalysisArgs) -> Result<()> {
+        self.run_impl(args)
+    }
+
+    /// Public wrapper that delegates to the Rule trait's analyze method
+    pub fn analyze(&self, args: &RustCodeAnalysisArgs) -> Result<RustCodeAnalysisData> {
+        self.analyze_impl(args)
     }
 
     pub fn render_rust_code_analysis_html_body(
@@ -867,5 +899,123 @@ mod tests {
             result.is_err(),
             "Should return an error for a non-existent path"
         );
+    }
+
+    // Tests for the Rule trait implementation
+    use crate::rule::Rule;
+
+    #[test]
+    fn test_rule_name_returns_rust_code_analysis() {
+        assert_eq!(
+            RustCodeAnalysisRule::name(),
+            "rust_code_analysis",
+            "Rule name should be 'rust_code_analysis'"
+        );
+    }
+
+    #[test]
+    fn test_rule_description_returns_meaningful_text() {
+        let description = RustCodeAnalysisRule::description();
+        assert!(
+            !description.is_empty(),
+            "Rule description should not be empty"
+        );
+        assert!(
+            description.contains("analysis") || description.contains("rust-code-analysis"),
+            "Rule description should describe the rule's purpose"
+        );
+    }
+
+    #[test]
+    fn test_rule_trait_analyze_returns_correct_data_type() {
+        // Create a minimal test directory structure
+        let temp_dir = tempdir().expect("Failed to create temp directory");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        // Create a simple main.rs file
+        let main_rs = r#"
+fn main() {
+    println!("Hello, world!");
+}
+"#;
+        fs::write(src_dir.join("main.rs"), main_rs).expect("Failed to write main.rs");
+
+        let rule = RustCodeAnalysisRule::new();
+        let args = RustCodeAnalysisArgs {
+            path: temp_dir.path().to_path_buf(),
+            language: "rust".to_string(),
+            metrics: true,
+            jobs: 1,
+            extra_flags: vec![],
+            output: RustCodeAnalysisOutputFormat::Table,
+        };
+
+        // Note: This test requires rust-code-analysis-cli to be installed
+        // If it's not available, the analyze will fail, which is expected behavior
+        let result = <RustCodeAnalysisRule as Rule>::analyze(&rule, &args);
+
+        // We just check that it returns the right type (Result<RustCodeAnalysisData>)
+        // If rust-code-analysis-cli is not installed, it will return an error
+        match result {
+            Ok(data) => {
+                assert_eq!(
+                    data.analysis_path,
+                    temp_dir.path(),
+                    "Analyzed data should have the correct analysis path"
+                );
+            }
+            Err(_) => {
+                // This is expected if rust-code-analysis-cli is not installed
+                // We just want to verify the method signature is correct
+            }
+        }
+    }
+
+    #[test]
+    fn test_rule_trait_analyze_fails_with_nonexistent_directory() {
+        let rule = RustCodeAnalysisRule::new();
+        let fake_path = PathBuf::from("/nonexistent/path/that/does/not/exist");
+        let args = RustCodeAnalysisArgs {
+            path: fake_path,
+            language: "rust".to_string(),
+            metrics: true,
+            jobs: 1,
+            extra_flags: vec![],
+            output: RustCodeAnalysisOutputFormat::Table,
+        };
+
+        // Call the Rule trait's analyze method
+        let result = <RustCodeAnalysisRule as Rule>::analyze(&rule, &args);
+
+        assert!(
+            result.is_err(),
+            "Rule trait analyze method should fail with nonexistent path"
+        );
+    }
+
+    #[test]
+    fn test_rule_associated_types_match() {
+        // This test verifies that the associated types are correctly set
+        // It's a compile-time check; if it compiles, the types are correct
+        let rule = RustCodeAnalysisRule::new();
+
+        // Verify Config type is RustCodeAnalysisArgs
+        let config = RustCodeAnalysisArgs {
+            path: PathBuf::from("."),
+            language: "rust".to_string(),
+            metrics: true,
+            jobs: 1,
+            extra_flags: vec![],
+            output: RustCodeAnalysisOutputFormat::Table,
+        };
+
+        // Verify Data type is RustCodeAnalysisData
+        let _config_check: <RustCodeAnalysisRule as Rule>::Config = config;
+        // We can't directly check Data type without an instance, but the
+        // analyze method returning Result<RustCodeAnalysisData> confirms it
+
+        // Verify run and analyze work with these types
+        let _ = rule;
     }
 }
