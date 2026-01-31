@@ -3,7 +3,7 @@ use chrono::{DateTime, NaiveDate, TimeZone, Utc}; // For parsing --since date
 use git2::{DiffOptions, Repository, Sort, TreeWalkMode, TreeWalkResult};
 use maud::{html, Markup};
 use prettytable::{format, Cell, Row, Table}; // Added for table output
-use serde::Serialize; // Added for custom output struct
+use serde::{Deserialize, Serialize}; // Added for custom output struct
                       // Ensure serde_json is explicitly imported
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -17,7 +17,7 @@ use crate::cli::{VolatilityArgs, VolatilityOutputFormat}; // Ensure VolatilityOu
 use crate::html_utils; // Import the new HTML utilities
 
 /// Represents the statistics gathered for a single crate.
-#[derive(Debug, Default, Clone, Serialize)] // Clone is useful for initialization
+#[derive(Debug, Default, Clone, Serialize, Deserialize)] // Clone is useful for initialization, Deserialize for testing
 pub struct CrateStats {
     /// The root directory path of the crate, relative to the repository root.
     pub root_path: PathBuf,
@@ -822,5 +822,841 @@ impl VolatilityRule {
             alpha: args.alpha,
             analysis_path: analysis_path_canonical,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::{VolatilityArgs, VolatilityOutputFormat};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Helper to initialize git repository in a directory
+    fn init_git_repo(dir: &PathBuf) -> Result<()> {
+        let output = Command::new("git")
+            .arg("init")
+            .current_dir(dir)
+            .output()?;
+        if !output.status.success() {
+            return Err(anyhow::anyhow!("Failed to init git repo: {:?}", output));
+        }
+        Ok(())
+    }
+
+    /// Helper to create a commit in a git repository
+    fn create_commit(dir: &PathBuf, message: &str) -> Result<()> {
+        // Set git config
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(dir)
+            .output()?;
+
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(dir)
+            .output()?;
+
+        // Add all files
+        Command::new("git")
+            .arg("add")
+            .arg(".")
+            .current_dir(dir)
+            .output()?;
+
+        // Commit
+        let output = Command::new("git")
+            .args(["commit", "-m", message])
+            .current_dir(dir)
+            .output()?;
+
+        if !output.status.success() {
+            return Err(anyhow::anyhow!(
+                "Failed to create commit: {:?}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Ok(())
+    }
+
+    /// Helper to create a test directory with Rust crates and git history
+    fn create_test_repo_with_crates() -> Result<TempDir> {
+        let temp_dir = TempDir::new()?;
+        let repo_path = temp_dir.path();
+
+        // Initialize git repo
+        init_git_repo(&repo_path.to_path_buf())?;
+
+        // Create src directory
+        let src_dir = repo_path.join("src");
+        fs::create_dir_all(&src_dir)?;
+
+        // Create Cargo.toml for main crate
+        let cargo_toml = r#"
+[package]
+name = "test-crate"
+version = "0.1.0"
+edition = "2021"
+"#;
+        fs::write(repo_path.join("Cargo.toml"), cargo_toml)?;
+
+        // Create a simple main.rs
+        let main_rs = r#"
+fn main() {
+    let x = 5;
+    println!("Hello, world!");
+}
+"#;
+        fs::write(src_dir.join("main.rs"), main_rs)?;
+
+        // Create initial commit
+        create_commit(&repo_path.to_path_buf(), "Initial commit")?;
+
+        Ok(temp_dir)
+    }
+
+    /// Helper to create test args
+    fn create_test_args(path: PathBuf) -> VolatilityArgs {
+        VolatilityArgs {
+            path,
+            alpha: 0.5,
+            since: None,
+            normalize: false,
+            output: VolatilityOutputFormat::Table,
+            skip_merges: false,
+        }
+    }
+
+    // Constructor tests
+
+    #[test]
+    fn test_volatility_rule_new_creates_instance() {
+        let rule = VolatilityRule::new();
+        // Just verify the rule can be created; struct has no fields to check
+        let _ = rule;
+    }
+
+    #[test]
+    fn test_volatility_rule_default_creates_instance() {
+        let _rule = VolatilityRule;
+    }
+
+    // Data structure tests
+
+    #[test]
+    fn test_crate_stats_default_creates_empty_stats() {
+        let stats = CrateStats::default();
+        assert_eq!(
+            stats.root_path,
+            PathBuf::new(),
+            "root_path should be empty by default"
+        );
+        assert_eq!(
+            stats.commit_touch_count, 0,
+            "commit_touch_count should be 0 by default"
+        );
+        assert_eq!(
+            stats.lines_added, 0,
+            "lines_added should be 0 by default"
+        );
+        assert_eq!(
+            stats.lines_deleted, 0,
+            "lines_deleted should be 0 by default"
+        );
+        assert_eq!(
+            stats.raw_score, 0.0,
+            "raw_score should be 0.0 by default"
+        );
+        assert!(
+            stats.total_loc.is_none(),
+            "total_loc should be None by default"
+        );
+        assert!(
+            stats.normalized_score.is_none(),
+            "normalized_score should be None by default"
+        );
+        assert!(
+            stats.birth_commit_time.is_none(),
+            "birth_commit_time should be None by default"
+        );
+    }
+
+    #[test]
+    fn test_crate_stats_clone_creates_independent_copy() {
+        let mut stats = CrateStats::default();
+        stats.root_path = PathBuf::from("test/path");
+        stats.commit_touch_count = 5;
+        stats.lines_added = 100;
+        stats.lines_deleted = 50;
+        stats.raw_score = 75.0;
+
+        let cloned = stats.clone();
+
+        // Verify all fields match
+        assert_eq!(cloned.root_path, stats.root_path);
+        assert_eq!(cloned.commit_touch_count, stats.commit_touch_count);
+        assert_eq!(cloned.lines_added, stats.lines_added);
+        assert_eq!(cloned.lines_deleted, stats.lines_deleted);
+        assert_eq!(cloned.raw_score, stats.raw_score);
+
+        // Modify original and verify clone is independent
+        stats.commit_touch_count = 10;
+        assert_eq!(
+            cloned.commit_touch_count, 5,
+            "clone should be independent of original"
+        );
+    }
+
+    #[test]
+    fn test_volatility_data_is_serializable() {
+        let mut crate_stats_map = CrateStatsMap::new();
+        crate_stats_map.insert(
+            "test-crate".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("src"),
+                commit_touch_count: 10,
+                lines_added: 100,
+                lines_deleted: 50,
+                raw_score: 60.0,
+                total_loc: Some(200),
+                normalized_score: Some(0.3),
+                birth_commit_time: Some(1234567890),
+            },
+        );
+
+        let data = VolatilityData {
+            crate_stats_map,
+            normalize: true,
+            alpha: 0.5,
+            analysis_path: PathBuf::from("/test/path"),
+        };
+
+        // Test serialization
+        let json = serde_json::to_string(&data);
+        assert!(
+            json.is_ok(),
+            "VolatilityData should be serializable to JSON"
+        );
+
+        let json_str = json.unwrap();
+        assert!(
+            json_str.contains("test-crate"),
+            "JSON should contain crate name"
+        );
+        assert!(
+            json_str.contains("commit_touch_count"),
+            "JSON should contain commit_touch_count"
+        );
+    }
+
+    #[test]
+    fn test_crate_stats_json_roundtrip() {
+        let stats = CrateStats {
+            root_path: PathBuf::from("src"),
+            commit_touch_count: 10,
+            lines_added: 100,
+            lines_deleted: 50,
+            raw_score: 60.0,
+            total_loc: Some(200),
+            normalized_score: Some(0.3),
+            birth_commit_time: Some(1234567890),
+        };
+
+        // Serialize to JSON
+        let json = serde_json::to_string(&stats).expect("serialization should succeed");
+
+        // Deserialize back
+        let deserialized: CrateStats =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+
+        assert_eq!(deserialized.root_path, stats.root_path);
+        assert_eq!(deserialized.commit_touch_count, stats.commit_touch_count);
+        assert_eq!(deserialized.lines_added, stats.lines_added);
+        assert_eq!(deserialized.lines_deleted, stats.lines_deleted);
+        assert_eq!(deserialized.raw_score, stats.raw_score);
+        assert_eq!(deserialized.total_loc, stats.total_loc);
+        assert_eq!(deserialized.normalized_score, stats.normalized_score);
+        assert_eq!(deserialized.birth_commit_time, stats.birth_commit_time);
+    }
+
+    // Pure function tests
+
+    #[test]
+    fn test_find_owning_crate_returns_exact_match() {
+        let rule = VolatilityRule::new();
+        let mut crate_stats_map = CrateStatsMap::new();
+
+        crate_stats_map.insert(
+            "crate-a".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("crates/a"),
+                ..Default::default()
+            },
+        );
+
+        crate_stats_map.insert(
+            "crate-b".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("crates/b"),
+                ..Default::default()
+            },
+        );
+
+        // Test exact match
+        let result = rule.find_owning_crate(&PathBuf::from("crates/a/src/main.rs"), &crate_stats_map);
+        assert!(
+            result.is_some(),
+            "should find owning crate for file in crate-a"
+        );
+        let (name, path) = result.unwrap();
+        assert_eq!(name, "crate-a");
+        assert_eq!(path, PathBuf::from("crates/a"));
+    }
+
+    #[test]
+    fn test_find_owning_crate_returns_longest_prefix_match() {
+        let rule = VolatilityRule::new();
+        let mut crate_stats_map = CrateStatsMap::new();
+
+        // Create nested crate structure
+        crate_stats_map.insert(
+            "root-crate".to_string(),
+            CrateStats {
+                root_path: PathBuf::from(""),
+                ..Default::default()
+            },
+        );
+
+        crate_stats_map.insert(
+            "nested-crate".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("crates/nested"),
+                ..Default::default()
+            },
+        );
+
+        // Test that nested crate wins over root crate
+        let result =
+            rule.find_owning_crate(&PathBuf::from("crates/nested/src/lib.rs"), &crate_stats_map);
+        assert!(
+            result.is_some(),
+            "should find owning crate for nested file"
+        );
+        let (name, path) = result.unwrap();
+        assert_eq!(name, "nested-crate");
+        assert_eq!(path, PathBuf::from("crates/nested"));
+    }
+
+    #[test]
+    fn test_find_owning_crate_returns_none_for_no_match() {
+        let rule = VolatilityRule::new();
+        let mut crate_stats_map = CrateStatsMap::new();
+
+        crate_stats_map.insert(
+            "crate-a".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("crates/a"),
+                ..Default::default()
+            },
+        );
+
+        // Test file not in any crate
+        let result = rule.find_owning_crate(&PathBuf::from("other/path/file.rs"), &crate_stats_map);
+        assert!(
+            result.is_none(),
+            "should return None for file not in any crate"
+        );
+    }
+
+    #[test]
+    fn test_find_owning_crate_with_empty_map_returns_none() {
+        let rule = VolatilityRule::new();
+        let crate_stats_map = CrateStatsMap::new();
+
+        let result = rule.find_owning_crate(&PathBuf::from("any/path/file.rs"), &crate_stats_map);
+        assert!(
+            result.is_none(),
+            "should return None when crate map is empty"
+        );
+    }
+
+    // HTML rendering tests
+
+    #[test]
+    fn test_render_volatility_html_body_produces_valid_markup() {
+        let rule = VolatilityRule::new();
+        let mut crate_stats_map = CrateStatsMap::new();
+
+        crate_stats_map.insert(
+            "test-crate".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("src"),
+                commit_touch_count: 10,
+                lines_added: 100,
+                lines_deleted: 50,
+                raw_score: 60.0,
+                total_loc: Some(200),
+                normalized_score: Some(0.3),
+                birth_commit_time: Some(1234567890),
+            },
+        );
+
+        let sorted_crates: Vec<_> = crate_stats_map.iter().collect();
+
+        let result = rule.render_volatility_html_body(&sorted_crates, true, 0.5);
+
+        assert!(
+            result.is_ok(),
+            "render_volatility_html_body should succeed with valid data"
+        );
+
+        let markup = result.unwrap();
+        let html_string = markup.into_string();
+        assert!(!html_string.is_empty(), "rendered HTML should not be empty");
+        assert!(
+            html_string.contains("table"),
+            "rendered HTML should contain a table element"
+        );
+    }
+
+    #[test]
+    fn test_render_volatility_html_body_with_normalize_false() {
+        let rule = VolatilityRule::new();
+        let mut crate_stats_map = CrateStatsMap::new();
+
+        crate_stats_map.insert(
+            "test-crate".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("src"),
+                commit_touch_count: 10,
+                lines_added: 100,
+                lines_deleted: 50,
+                raw_score: 60.0,
+                total_loc: None,
+                normalized_score: None,
+                birth_commit_time: Some(1234567890),
+            },
+        );
+
+        let sorted_crates: Vec<_> = crate_stats_map.iter().collect();
+
+        let result = rule.render_volatility_html_body(&sorted_crates, false, 0.5);
+
+        assert!(
+            result.is_ok(),
+            "render_volatility_html_body should succeed with normalize=false"
+        );
+
+        let markup = result.unwrap();
+        let html_string = markup.into_string();
+
+        // When normalize is false, Total LoC and Norm Score columns should not be in header
+        // The header still has the columns for consistency but we can verify alpha is shown
+        assert!(
+            html_string.contains("0.5"),
+            "rendered HTML should contain alpha value"
+        );
+    }
+
+    #[test]
+    fn test_render_volatility_html_body_with_empty_crates() {
+        let rule = VolatilityRule::new();
+        let crate_stats_map = CrateStatsMap::new();
+        let sorted_crates: Vec<_> = crate_stats_map.iter().collect();
+
+        let result = rule.render_volatility_html_body(&sorted_crates, true, 0.5);
+
+        assert!(
+            result.is_ok(),
+            "render_volatility_html_body should succeed even with empty crates"
+        );
+
+        let markup = result.unwrap();
+        let html_string = markup.into_string();
+        assert!(
+            html_string.contains("table"),
+            "rendered HTML should contain table element even when empty"
+        );
+    }
+
+    #[test]
+    fn test_render_volatility_html_body_contains_crate_name() {
+        let rule = VolatilityRule::new();
+        let mut crate_stats_map = CrateStatsMap::new();
+
+        crate_stats_map.insert(
+            "my-awesome-crate".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("src"),
+                commit_touch_count: 5,
+                lines_added: 50,
+                lines_deleted: 25,
+                raw_score: 30.0,
+                total_loc: Some(100),
+                normalized_score: Some(0.3),
+                birth_commit_time: Some(1234567890),
+            },
+        );
+
+        let sorted_crates: Vec<_> = crate_stats_map.iter().collect();
+
+        let markup = rule
+            .render_volatility_html_body(&sorted_crates, true, 0.5)
+            .expect("render should succeed");
+        let html_string = markup.into_string();
+
+        assert!(
+            html_string.contains("my-awesome-crate"),
+            "rendered HTML should contain the crate name"
+        );
+    }
+
+    // Integration tests with git repository
+
+    #[test]
+    fn test_discover_crates_finds_single_crate() {
+        let temp_dir = create_test_repo_with_crates()
+            .expect("Failed to create test repo with crates");
+
+        let rule = VolatilityRule::new();
+        let result = rule.discover_crates_and_init_stats(temp_dir.path());
+
+        assert!(
+            result.is_ok(),
+            "discover_crates_and_init_stats should find the test crate"
+        );
+
+        let crate_map = result.unwrap();
+        assert!(
+            crate_map.contains_key("test-crate"),
+            "should find the test-crate"
+        );
+
+        let stats = crate_map.get("test-crate").unwrap();
+        assert_eq!(
+            stats.root_path,
+            PathBuf::from(""),
+            "root_path should be repo root for this crate"
+        );
+        assert_eq!(stats.commit_touch_count, 0, "initial touch count should be 0");
+        assert_eq!(stats.lines_added, 0, "initial lines_added should be 0");
+        assert_eq!(stats.lines_deleted, 0, "initial lines_deleted should be 0");
+    }
+
+    #[test]
+    fn test_discover_crates_fails_with_no_crates() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+        // Create directory without Cargo.toml
+        let empty_dir = temp_dir.path().join("empty");
+        fs::create_dir_all(&empty_dir).expect("Failed to create empty directory");
+
+        let rule = VolatilityRule::new();
+        let result = rule.discover_crates_and_init_stats(&empty_dir);
+
+        assert!(
+            result.is_err(),
+            "discover_crates_and_init_stats should fail when no crates found"
+        );
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("No crates") || error_msg.contains("Cargo.toml"),
+            "error message should mention no crates found"
+        );
+    }
+
+    #[test]
+    fn test_analyze_with_valid_git_repository() {
+        let temp_dir = create_test_repo_with_crates()
+            .expect("Failed to create test repo with crates");
+
+        let rule = VolatilityRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        let result = rule.analyze(&args);
+
+        assert!(
+            result.is_ok(),
+            "analyze should succeed with valid git repository containing crates"
+        );
+
+        let data = result.unwrap();
+        assert_eq!(data.alpha, 0.5, "alpha should match args");
+        assert!(!data.normalize, "normalize should match args");
+        assert_eq!(
+            data.analysis_path,
+            temp_dir.path().canonicalize().unwrap(),
+            "analysis_path should be canonicalized"
+        );
+        assert!(
+            !data.crate_stats_map.is_empty(),
+            "should find at least one crate"
+        );
+    }
+
+    #[test]
+    fn test_analyze_fails_with_non_git_repository() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        // Create Cargo.toml without git repo
+        let cargo_toml = r#"
+[package]
+name = "no-git-crate"
+version = "0.1.0"
+edition = "2021"
+"#;
+        fs::write(temp_dir.path().join("Cargo.toml"), cargo_toml)
+            .expect("Failed to write Cargo.toml");
+
+        let rule = VolatilityRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        let result = rule.analyze(&args);
+
+        assert!(result.is_err(), "analyze should fail with non-git repository");
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("Git repository") || error_msg.contains("git"),
+            "error message should mention git repository issue"
+        );
+    }
+
+    #[test]
+    fn test_analyze_with_normalize_enabled_calculates_loc() {
+        let temp_dir = create_test_repo_with_crates()
+            .expect("Failed to create test repo with crates");
+
+        let rule = VolatilityRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.normalize = true;
+
+        let result = rule.analyze(&args);
+
+        assert!(
+            result.is_ok(),
+            "analyze should succeed with normalize=true"
+        );
+
+        let data = result.unwrap();
+        assert!(data.normalize, "normalize should be true in result");
+
+        // Check that LoC was calculated for at least one crate
+        let crate_has_loc = data
+            .crate_stats_map
+            .values()
+            .any(|stats| stats.total_loc.is_some() && stats.total_loc.unwrap() > 0);
+
+        assert!(
+            crate_has_loc,
+            "at least one crate should have total_loc calculated"
+        );
+    }
+
+    #[test]
+    fn test_analyze_calculates_raw_score_correctly() {
+        let temp_dir = create_test_repo_with_crates()
+            .expect("Failed to create test repo with crates");
+
+        let rule = VolatilityRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.alpha = 1.0; // Use alpha = 1.0 for simpler calculation
+
+        let result = rule.analyze(&args);
+
+        assert!(result.is_ok(), "analyze should succeed");
+
+        let data = result.unwrap();
+        for stats in data.crate_stats_map.values() {
+            // raw_score = (lines_added + lines_deleted) + alpha * commit_touch_count
+            let expected_raw_score = (stats.lines_added + stats.lines_deleted) as f64
+                + args.alpha * stats.commit_touch_count as f64;
+            assert!(
+                (stats.raw_score - expected_raw_score).abs() < 0.01,
+                "raw_score should be calculated correctly: expected {}, got {}",
+                expected_raw_score,
+                stats.raw_score
+            );
+        }
+    }
+
+    // Output format tests
+
+    #[test]
+    fn test_run_with_table_output_succeeds() {
+        let temp_dir = create_test_repo_with_crates()
+            .expect("Failed to create test repo with crates");
+
+        let rule = VolatilityRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.output = VolatilityOutputFormat::Table;
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_ok(),
+            "run with Table output should succeed with valid repository"
+        );
+    }
+
+    #[test]
+    fn test_run_with_html_output_succeeds() {
+        let temp_dir = create_test_repo_with_crates()
+            .expect("Failed to create test repo with crates");
+
+        let rule = VolatilityRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.output = VolatilityOutputFormat::Html;
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_ok(),
+            "run with Html output should succeed with valid repository"
+        );
+    }
+
+    #[test]
+    fn test_run_with_json_output_succeeds() {
+        let temp_dir = create_test_repo_with_crates()
+            .expect("Failed to create test repo with crates");
+
+        let rule = VolatilityRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.output = VolatilityOutputFormat::Json;
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_ok(),
+            "run with Json output should succeed with valid repository"
+        );
+    }
+
+    #[test]
+    fn test_run_with_yaml_output_succeeds() {
+        let temp_dir = create_test_repo_with_crates()
+            .expect("Failed to create test repo with crates");
+
+        let rule = VolatilityRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.output = VolatilityOutputFormat::Yaml;
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_ok(),
+            "run with Yaml output should succeed with valid repository"
+        );
+    }
+
+    #[test]
+    fn test_run_with_csv_output_succeeds() {
+        let temp_dir = create_test_repo_with_crates()
+            .expect("Failed to create test repo with crates");
+
+        let rule = VolatilityRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.output = VolatilityOutputFormat::Csv;
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_ok(),
+            "run with Csv output should succeed with valid repository"
+        );
+    }
+
+    // Edge case tests
+
+    #[test]
+    fn test_crate_stats_with_all_optional_fields_none() {
+        let stats = CrateStats {
+            root_path: PathBuf::from("test"),
+            commit_touch_count: 0,
+            lines_added: 0,
+            lines_deleted: 0,
+            raw_score: 0.0,
+            total_loc: None,
+            normalized_score: None,
+            birth_commit_time: None,
+        };
+
+        // Should serialize correctly
+        let json = serde_json::to_string(&stats)
+            .expect("CrateStats with None fields should serialize");
+        assert!(json.contains("test"), "JSON should contain path");
+        assert!(json.contains("0"), "JSON should contain zero values");
+    }
+
+    #[test]
+    fn test_crate_stats_with_zero_values() {
+        let stats = CrateStats {
+            root_path: PathBuf::from("test"),
+            commit_touch_count: 0,
+            lines_added: 0,
+            lines_deleted: 0,
+            raw_score: 0.0,
+            total_loc: Some(0),
+            normalized_score: Some(0.0),
+            birth_commit_time: Some(0),
+        };
+
+        assert_eq!(stats.commit_touch_count, 0);
+        assert_eq!(stats.lines_added, 0);
+        assert_eq!(stats.lines_deleted, 0);
+        assert_eq!(stats.raw_score, 0.0);
+    }
+
+    #[test]
+    fn test_find_owning_crate_with_multiple_nested_crates() {
+        let rule = VolatilityRule::new();
+        let mut crate_stats_map = CrateStatsMap::new();
+
+        // Create deeply nested structure
+        crate_stats_map.insert(
+            "workspace".to_string(),
+            CrateStats {
+                root_path: PathBuf::from(""),
+                ..Default::default()
+            },
+        );
+
+        crate_stats_map.insert(
+            "crates-level".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("crates"),
+                ..Default::default()
+            },
+        );
+
+        crate_stats_map.insert(
+            "nested-crate".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("crates/nested"),
+                ..Default::default()
+            },
+        );
+
+        crate_stats_map.insert(
+            "deeply-nested".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("crates/nested/deep"),
+                ..Default::default()
+            },
+        );
+
+        // Test that deepest match wins
+        let result = rule.find_owning_crate(
+            &PathBuf::from("crates/nested/deep/src/lib.rs"),
+            &crate_stats_map,
+        );
+
+        assert!(result.is_some());
+        let (name, _path) = result.unwrap();
+        assert_eq!(name, "deeply-nested");
     }
 }
