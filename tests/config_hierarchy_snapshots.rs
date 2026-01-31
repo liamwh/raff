@@ -4,9 +4,10 @@
 //! loading across various scenarios.
 //!
 //! Note: These tests modify the current directory and environment variables,
-//! so they should be run with `--test-threads=1` for reliable results.
+//! so they run serially using the `serial_test` crate.
 
 use raff_core::config_hierarchy::{load_hierarchical_config, ConfigSourceType, HierarchicalConfig};
+use serial_test::serial;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -108,6 +109,7 @@ fn format_hierarchical_config(hierarchical: &HierarchicalConfig) -> String {
 }
 
 #[test]
+#[serial]
 fn snapshot_full_hierarchy_loading() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let original_cwd = std::env::current_dir().expect("Failed to get cwd");
@@ -208,6 +210,7 @@ granularity = "module"
 }
 
 #[test]
+#[serial]
 fn snapshot_partial_hierarchy_user_and_repo_with_possible_traditional() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let original_cwd = std::env::current_dir().expect("Failed to get cwd");
@@ -243,6 +246,17 @@ alpha = 0.015
         r#"
 [statement_count]
 threshold = 18
+"#,
+    );
+
+    // Create a Raff.toml with values higher than repo-local to prevent upward search
+    // while preserving the test's intent (repo-local values should take precedence)
+    let _traditional_config = create_temp_config_file(
+        temp_dir.path(),
+        "Raff.toml",
+        r#"
+[statement_count]
+threshold = 100
 "#,
     );
 
@@ -288,6 +302,7 @@ threshold = 18
 }
 
 #[test]
+#[serial]
 fn snapshot_cli_explicit_path_override() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let original_cwd = std::env::current_dir().expect("Failed to get cwd");
@@ -376,6 +391,7 @@ granularity = "crate"
 }
 
 #[test]
+#[serial]
 fn snapshot_default_config_when_no_user_or_repo_config() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let original_cwd = std::env::current_dir().expect("Failed to get cwd");
@@ -390,10 +406,23 @@ fn snapshot_default_config_when_no_user_or_repo_config() {
     let git_temp_dir = TempDir::new().expect("Failed to create git temp dir");
     init_git_repo(git_temp_dir.path());
 
-    // Change to git temp directory (has git repo but no config files)
+    // Create a Raff.toml with default values to prevent upward search from finding external configs
+    let _traditional_config = create_temp_config_file(
+        git_temp_dir.path(),
+        "Raff.toml",
+        r#"
+[statement_count]
+threshold = 10
+
+[volatility]
+alpha = 0.01
+"#,
+    );
+
+    // Change to git temp directory (has git repo but no user or repo-local config)
     std::env::set_current_dir(git_temp_dir.path()).expect("Failed to cd to git temp dir");
 
-    // Load config with no configs available in the immediate directory
+    // Load config with no user or repo-local configs available
     let result = load_hierarchical_config(None);
 
     // Restore original directory

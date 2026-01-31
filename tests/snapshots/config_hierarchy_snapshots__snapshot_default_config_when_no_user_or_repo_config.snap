@@ -3,6 +3,10 @@ source: tests/config_hierarchy_snapshots.rs
 expression: formatted
 ---
 ## Sources
+  1. TraditionalLocal from Raff.toml
+     statement_count.threshold: 10
+     volatility.alpha: 0.01
+     general.verbose: false
 
 ## Merged Configuration
   statement_count.threshold: 10

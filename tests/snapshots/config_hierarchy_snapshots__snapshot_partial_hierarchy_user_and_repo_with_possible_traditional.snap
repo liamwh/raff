@@ -11,9 +11,13 @@ expression: formatted
      statement_count.threshold: 18
      volatility.alpha: 0.01
      general.verbose: false
+  3. TraditionalLocal from Raff.toml
+     statement_count.threshold: 100
+     volatility.alpha: 0.01
+     general.verbose: false
 
 ## Merged Configuration
-  statement_count.threshold: 18
+  statement_count.threshold: 100
   volatility.alpha: 0.01
   general.verbose: false
   volatility.normalize: false
