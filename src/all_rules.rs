@@ -128,6 +128,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         skip_merges: args.vol_skip_merges,
         output: crate::cli::VolatilityOutputFormat::Table, // format is irrelevant for analyze
         ci_output: None,
+        output_file: None,
     };
     let coup_args = crate::cli::CouplingArgs {
         path: args.path.clone(),
@@ -277,6 +278,7 @@ mod tests {
             skip_merges: false,
             output: crate::cli::VolatilityOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         }
     }
 
@@ -522,6 +524,7 @@ mod tests {
             skip_merges: all_args.vol_skip_merges,
             output: crate::cli::VolatilityOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         assert_eq!(
@@ -626,6 +629,7 @@ mod tests {
             skip_merges: all_args.vol_skip_merges,
             output: VolatilityOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         assert_eq!(
@@ -648,6 +652,7 @@ mod tests {
             skip_merges: all_args.vol_skip_merges,
             output: crate::cli::VolatilityOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         assert!(

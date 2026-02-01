@@ -43,6 +43,7 @@
 //!     output: VolatilityOutputFormat::Table,
 //!     skip_merges: false,
 //!     ci_output: None,
+//!     output_file: None,
 //! };
 //!
 //! if let Err(e) = rule.run(&args) {
@@ -83,14 +84,15 @@ use serde::{Deserialize, Serialize}; // Added for custom output struct
                                      // Ensure serde_json is explicitly imported
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader}; // For reading files line by line in LoC calculation
+use std::io::{BufRead, BufReader, Write}; // For reading files line by line in LoC calculation and for writing output files
 use std::path::{Path, PathBuf};
 use toml::Value as TomlValue;
-// Added import for tracing
+use tracing::instrument; // Added import for tracing
 use walkdir::WalkDir; // For recursively finding Cargo.toml files // For parsing Cargo.toml
 
 use crate::cache::{CacheEntry, CacheKey, CacheManager};
-use crate::cli::{VolatilityArgs, VolatilityOutputFormat}; // Ensure VolatilityOutputFormat is imported
+use crate::ci_report::{Finding, Severity, ToFindings};
+use crate::cli::{CiOutputFormat, VolatilityArgs, VolatilityOutputFormat}; // Ensure VolatilityOutputFormat is imported
 use crate::error::{RaffError, Result};
 use crate::html_utils; // Import the new HTML utilities
 use crate::rule::Rule;
@@ -158,6 +160,71 @@ pub struct VolatilityData {
     pub normalize: bool,
     pub alpha: f64,
     pub analysis_path: PathBuf,
+}
+
+impl ToFindings for VolatilityData {
+    #[instrument(skip(self), fields(rule_id = "volatility", alpha = self.alpha))]
+    fn to_findings(&self) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        // Generate a finding for each crate with high volatility
+        // We consider a crate to have high volatility if it's in the top quartile of raw scores
+        // This is a heuristic - users can adjust thresholds based on their needs
+        if self.crate_stats_map.is_empty() {
+            return findings;
+        }
+
+        // Calculate threshold as 75th percentile of raw scores
+        let mut scores: Vec<f64> = self
+            .crate_stats_map
+            .values()
+            .map(|stats| stats.raw_score)
+            .collect();
+        scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        // For the 75th percentile calculation
+        // Use a minimum threshold of the median when we have few crates
+        let threshold_idx = if scores.len() == 1 {
+            0
+        } else {
+            (scores.len() * 3 / 4).min(scores.len() - 1)
+        };
+        let threshold = scores.get(threshold_idx).copied().unwrap_or(0.0);
+
+        for (crate_name, stats) in &self.crate_stats_map {
+            // Only generate findings for crates with volatility at or above threshold
+            // This ensures at least the top 25% of crates (by volatility) get flagged
+            if stats.raw_score >= threshold && threshold > 0.0 {
+                findings.push(Finding {
+                    rule_id: "volatility".to_string(),
+                    rule_name: "Code Volatility Rule".to_string(),
+                    severity: Severity::Warning,
+                    message: format!(
+                        "Crate '{}' shows high volatility: raw score {:.2} ({} commits, {} lines added, {} lines deleted){}",
+                        crate_name,
+                        stats.raw_score,
+                        stats.commit_touch_count,
+                        stats.lines_added,
+                        stats.lines_deleted,
+                        if let Some(norm) = stats.normalized_score {
+                            format!(", normalized score {:.4}", norm)
+                        } else {
+                            String::new()
+                        }
+                    ),
+                    location: None, // Volatility is crate-level, no specific file location
+                    help_uri: Some(
+                        "https://github.com/liamwh/raff/docs/volatility".to_string(),
+                    ),
+                    fingerprint: Some(format!(
+                        "volatility:{}:{}:{}",
+                        crate_name, self.alpha, stats.raw_score as i64
+                    )),
+                });
+            }
+        }
+        findings
+    }
 }
 
 impl Rule for VolatilityRule {
@@ -644,6 +711,40 @@ impl VolatilityRule {
     fn run_impl(&self, args: &VolatilityArgs) -> Result<()> {
         let data = self.analyze(args)?;
 
+        // Check for CI output first (takes precedence)
+        if let Some(ci_format) = &args.ci_output {
+            let findings = data.to_findings();
+
+            let output = match ci_format {
+                CiOutputFormat::Sarif => crate::ci_report::to_sarif(&findings)?,
+                CiOutputFormat::JUnit => crate::ci_report::to_junit(&findings, "volatility")?,
+            };
+
+            // Write to file if specified, otherwise stdout
+            if let Some(ref output_file) = args.output_file {
+                let mut file = fs::File::create(output_file).map_err(|e| {
+                    RaffError::io_error(format!(
+                        "Failed to create output file {}: {}",
+                        output_file.display(),
+                        e
+                    ))
+                })?;
+                file.write_all(output.as_bytes()).map_err(|e| {
+                    RaffError::io_error(format!(
+                        "Failed to write to output file {}: {}",
+                        output_file.display(),
+                        e
+                    ))
+                })?;
+            } else {
+                println!("{output}");
+            }
+
+            // Note: Volatility uses Severity::Warning, which doesn't fail CI
+            // We always return Ok for volatility warnings
+            return Ok(());
+        }
+
         // Sort crates by raw_score (descending) for display
         let mut sorted_crates: Vec<_> = data.crate_stats_map.iter().collect();
         sorted_crates.sort_by(|a, b| {
@@ -996,7 +1097,7 @@ impl VolatilityRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::{VolatilityArgs, VolatilityOutputFormat};
+    use crate::cli::{CiOutputFormat, VolatilityArgs, VolatilityOutputFormat};
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
@@ -1100,6 +1201,7 @@ fn main() {
             output: VolatilityOutputFormat::Table,
             skip_merges: false,
             ci_output: None,
+            output_file: None,
         }
     }
 
@@ -1943,6 +2045,7 @@ edition = "2021"
             output: VolatilityOutputFormat::Table,
             skip_merges: false,
             ci_output: None,
+            output_file: None,
         };
 
         // Verify Data type is VolatilityData
@@ -1952,5 +2055,259 @@ edition = "2021"
 
         // Verify run and analyze work with these types
         let _ = rule;
+    }
+
+    // Tests for CI output functionality
+
+    #[test]
+    fn test_to_findings_with_empty_crate_stats() {
+        let data = VolatilityData {
+            crate_stats_map: CrateStatsMap::new(),
+            normalize: false,
+            alpha: 0.5,
+            analysis_path: PathBuf::from("/test"),
+        };
+        let findings = data.to_findings();
+        assert!(
+            findings.is_empty(),
+            "to_findings should return empty when crate stats is empty"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_with_no_high_volatility_crates() {
+        let mut crate_stats_map = CrateStatsMap::new();
+        // All crates have low volatility (raw_score = 0)
+        crate_stats_map.insert(
+            "stable-crate".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("stable"),
+                commit_touch_count: 0,
+                lines_added: 0,
+                lines_deleted: 0,
+                raw_score: 0.0,
+                total_loc: None,
+                normalized_score: None,
+                birth_commit_time: None,
+            },
+        );
+
+        let data = VolatilityData {
+            crate_stats_map,
+            normalize: false,
+            alpha: 0.5,
+            analysis_path: PathBuf::from("/test"),
+        };
+        let findings = data.to_findings();
+        assert!(
+            findings.is_empty(),
+            "to_findings should return empty when no crates exceed threshold"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_with_high_volatility_crates() {
+        let mut crate_stats_map = CrateStatsMap::new();
+        // Add one crate with high volatility and one with low volatility
+        crate_stats_map.insert(
+            "high-volatility-crate".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("high"),
+                commit_touch_count: 100,
+                lines_added: 500,
+                lines_deleted: 200,
+                raw_score: 750.0,
+                total_loc: Some(1000),
+                normalized_score: Some(0.75),
+                birth_commit_time: Some(1234567890),
+            },
+        );
+        crate_stats_map.insert(
+            "low-volatility-crate".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("low"),
+                commit_touch_count: 1,
+                lines_added: 5,
+                lines_deleted: 2,
+                raw_score: 7.05,
+                total_loc: None,
+                normalized_score: None,
+                birth_commit_time: None,
+            },
+        );
+
+        let data = VolatilityData {
+            crate_stats_map,
+            normalize: false,
+            alpha: 0.5,
+            analysis_path: PathBuf::from("/test"),
+        };
+        let findings = data.to_findings();
+
+        assert!(
+            !findings.is_empty(),
+            "to_findings should return findings when crates exceed threshold"
+        );
+
+        // Verify the first finding has the expected properties
+        let finding = &findings[0];
+        assert_eq!(finding.rule_id, "volatility");
+        assert_eq!(finding.rule_name, "Code Volatility Rule");
+        assert_eq!(finding.severity, Severity::Warning);
+        assert!(
+            finding.message.contains("high volatility"),
+            "finding message should mention high volatility"
+        );
+        assert!(
+            finding.fingerprint.is_some(),
+            "finding should have a fingerprint for deduplication"
+        );
+        assert!(
+            finding.location.is_none(),
+            "finding location should be None since volatility is crate-level"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_fingerprint_includes_crate_and_alpha() {
+        let mut crate_stats_map = CrateStatsMap::new();
+        crate_stats_map.insert(
+            "test-crate".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("test"),
+                commit_touch_count: 100,
+                lines_added: 500,
+                lines_deleted: 200,
+                raw_score: 750.0,
+                total_loc: None,
+                normalized_score: None,
+                birth_commit_time: None,
+            },
+        );
+
+        let data = VolatilityData {
+            crate_stats_map,
+            normalize: false,
+            alpha: 0.5,
+            analysis_path: PathBuf::from("/test"),
+        };
+        let findings = data.to_findings();
+
+        assert!(!findings.is_empty(), "should have at least one finding");
+
+        let fingerprint = findings[0]
+            .fingerprint
+            .as_ref()
+            .expect("should have fingerprint");
+        assert!(
+            fingerprint.contains("volatility:"),
+            "fingerprint should contain rule ID"
+        );
+        assert!(
+            fingerprint.contains(":test-crate:"),
+            "fingerprint should contain crate name"
+        );
+        assert!(
+            fingerprint.contains(":0.5:"),
+            "fingerprint should contain alpha value"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_warning_severity() {
+        let mut crate_stats_map = CrateStatsMap::new();
+        crate_stats_map.insert(
+            "volatile-crate".to_string(),
+            CrateStats {
+                root_path: PathBuf::from("volatile"),
+                commit_touch_count: 50,
+                lines_added: 200,
+                lines_deleted: 100,
+                raw_score: 350.0,
+                total_loc: None,
+                normalized_score: None,
+                birth_commit_time: None,
+            },
+        );
+
+        let data = VolatilityData {
+            crate_stats_map,
+            normalize: false,
+            alpha: 0.5,
+            analysis_path: PathBuf::from("/test"),
+        };
+        let findings = data.to_findings();
+
+        assert!(!findings.is_empty(), "should have at least one finding");
+        assert_eq!(
+            findings[0].severity,
+            Severity::Warning,
+            "volatility findings should have Warning severity"
+        );
+    }
+
+    #[test]
+    fn test_run_with_ci_output_sarif_succeeds() {
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
+        let rule = VolatilityRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.ci_output = Some(CiOutputFormat::Sarif);
+
+        let result = rule.run(&args);
+
+        assert!(result.is_ok(), "run with SARIF CI output should succeed");
+    }
+
+    #[test]
+    fn test_run_with_ci_output_junit_succeeds() {
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
+        let rule = VolatilityRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.ci_output = Some(CiOutputFormat::JUnit);
+
+        let result = rule.run(&args);
+
+        assert!(result.is_ok(), "run with JUnit CI output should succeed");
+    }
+
+    #[test]
+    fn test_run_with_ci_output_does_not_fail_on_warnings() {
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
+        let rule = VolatilityRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.ci_output = Some(CiOutputFormat::Sarif);
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_ok(),
+            "run with CI output should not fail on warnings (Warning severity doesn't fail CI)"
+        );
+    }
+
+    #[test]
+    fn test_run_with_ci_output_and_output_file_succeeds() {
+        let temp_dir =
+            create_test_repo_with_crates().expect("Failed to create test repo with crates");
+        let rule = VolatilityRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.ci_output = Some(CiOutputFormat::Sarif);
+        args.output_file = Some(temp_dir.path().join("output.sarif.json"));
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_ok(),
+            "run with CI output and output file should succeed"
+        );
+
+        // Verify the file was created
+        assert!(
+            temp_dir.path().join("output.sarif.json").exists(),
+            "output file should be created"
+        );
     }
 }

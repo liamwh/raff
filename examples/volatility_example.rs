@@ -11,6 +11,7 @@ fn main() -> Result<()> {
         skip_merges: false,
         output: VolatilityOutputFormat::Table,
         ci_output: None,
+        output_file: None,
     };
 
     let rule = VolatilityRule::new();

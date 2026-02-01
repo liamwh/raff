@@ -145,6 +145,11 @@ pub struct VolatilityArgs {
     /// Use this for SARIF or JUnit output in CI/CD pipelines.
     #[clap(long, value_enum)]
     pub ci_output: Option<CiOutputFormat>,
+
+    /// Output file path for the report.
+    /// When specified, writes output to the file instead of stdout.
+    #[clap(long)]
+    pub output_file: Option<std::path::PathBuf>,
 }
 
 /// Enum representing the supported output formats for the coupling report.

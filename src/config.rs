@@ -407,6 +407,11 @@ pub fn merge_volatility_args(
         }
     }
 
+    // Merge output_file: CLI takes precedence if set, otherwise use config
+    if merged.output_file.is_none() {
+        merged.output_file = config.general.output_file.clone();
+    }
+
     merged
 }
 
@@ -1157,6 +1162,7 @@ verbose = true
             skip_merges: false,
             output: crate::cli::VolatilityOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         let merged = merge_volatility_args(&cli_args, &config);
@@ -1185,6 +1191,7 @@ verbose = true
             skip_merges: false,
             output: crate::cli::VolatilityOutputFormat::Json,
             ci_output: None,
+            output_file: None,
         };
 
         let merged = merge_volatility_args(&cli_args, &config);
