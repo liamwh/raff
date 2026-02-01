@@ -24,6 +24,7 @@
 //! - [`contributor_report`] - Contributor activity reporting
 //! - [`all_rules`] - Orchestration for running all rules
 //! - [`cache`] - Result caching for improved performance
+//! - [`ci_report`] - CI/CD platform report generation (SARIF, JUnit)
 //!
 //! ## Usage as a Library
 //!
@@ -64,6 +65,7 @@
 // Module declarations
 pub mod all_rules;
 pub mod cache;
+pub mod ci_report;
 pub mod cli;
 pub mod config;
 pub mod config_hierarchy;
@@ -116,3 +118,6 @@ pub use crate::error::{RaffError as Error, Result};
 
 // Rule trait exports
 pub use crate::rule::Rule;
+
+// CI report exports
+pub use crate::ci_report::{to_junit, to_sarif, Finding, Location, Severity, ToFindings};
