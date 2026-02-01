@@ -58,6 +58,10 @@ pub struct GeneralConfig {
     /// Enable verbose output.
     #[serde(default)]
     pub verbose: bool,
+
+    /// Output file path for the report.
+    /// When specified, writes output to the file instead of stdout.
+    pub output_file: Option<PathBuf>,
 }
 
 /// Statement count rule configuration.

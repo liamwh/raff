@@ -39,6 +39,7 @@
 //!     since: Some("2023-01-01".to_string()),
 //!     decay: 0.01,
 //!     output: ContributorReportOutputFormat::Table,
+//!     ci_output: None,
 //! };
 //!
 //! if let Err(e) = rule.run(&args) {

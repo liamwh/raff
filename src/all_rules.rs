@@ -32,6 +32,7 @@
 //!     rca_jobs: 4,
 //!     rca_metrics: true,
 //!     rca_language: "rust".to_string(),
+//!     ci_output: None,
 //! };
 //!
 //! run_all(&args)?;

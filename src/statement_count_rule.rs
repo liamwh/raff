@@ -24,6 +24,7 @@
 //!     path: PathBuf::from("."),
 //!     threshold: 10,
 //!     output: StatementCountOutputFormat::Table,
+//!     ci_output: None,
 //! };
 //!
 //! if let Err(e) = rule.run(&args) {

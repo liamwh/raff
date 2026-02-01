@@ -201,10 +201,12 @@ fn any_general_config() -> BoxedStrategy<GeneralConfig> {
     (
         prop::option::of(prop::string::string_regex(r"[a-zA-Z0-9_/\.]+").unwrap()),
         any::<bool>(),
+        prop::option::of(prop::string::string_regex(r"[a-zA-Z0-9_/\.]+").unwrap()),
     )
-        .prop_map(|(path, verbose)| GeneralConfig {
+        .prop_map(|(path, verbose, output_file)| GeneralConfig {
             path: path.map(PathBuf::from),
             verbose,
+            output_file: output_file.map(PathBuf::from),
         })
         .boxed()
 }

@@ -43,6 +43,7 @@
 //!     path: PathBuf::from("./src"),
 //!     threshold: 1000,
 //!     output: StatementCountOutputFormat::Table,
+//!     ci_output: None,
 //! };
 //!
 //! // Run the analysis

@@ -42,6 +42,7 @@
 //!     normalize: true,
 //!     output: VolatilityOutputFormat::Table,
 //!     skip_merges: false,
+//!     ci_output: None,
 //! };
 //!
 //! if let Err(e) = rule.run(&args) {

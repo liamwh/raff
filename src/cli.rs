@@ -27,6 +27,12 @@ pub struct Cli {
     #[clap(long, global = true)]
     pub clear_cache: bool,
 
+    /// Output file path for the report.
+    /// When specified, writes output to the file instead of stdout.
+    /// Precedence: CLI flag > config file > stdout.
+    #[clap(long, global = true)]
+    pub output_file: Option<std::path::PathBuf>,
+
     #[command(subcommand)]
     pub command: Commands,
 }

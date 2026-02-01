@@ -34,6 +34,7 @@
 //!     path: PathBuf::from("."),
 //!     output: CouplingOutputFormat::Table,
 //!     granularity: CouplingGranularity::Both,
+//!     ci_output: None,
 //! };
 //!
 //! if let Err(e) = rule.run(&args) {

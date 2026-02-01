@@ -34,6 +34,7 @@
 //!     jobs: 4,
 //!     extra_flags: vec![],
 //!     output: RustCodeAnalysisOutputFormat::Table,
+//!     ci_output: None,
 //! };
 //!
 //! if let Err(e) = rule.run(&args) {

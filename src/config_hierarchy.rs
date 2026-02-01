@@ -332,6 +332,10 @@ impl Mergeable for crate::config::GeneralConfig {
         Self {
             path: other.path.clone().or_else(|| self.path.clone()),
             verbose: other.verbose || self.verbose,
+            output_file: other
+                .output_file
+                .clone()
+                .or_else(|| self.output_file.clone()),
         }
     }
 }
@@ -545,10 +549,12 @@ mod tests {
         let base = GeneralConfig {
             path: Some(PathBuf::from("/base/path")),
             verbose: false,
+            output_file: None,
         };
         let override_ = GeneralConfig {
             path: Some(PathBuf::from("/override/path")),
             verbose: true,
+            output_file: None,
         };
 
         let merged = base.merge(&override_);
@@ -562,10 +568,12 @@ mod tests {
         let base = GeneralConfig {
             path: Some(PathBuf::from("/base/path")),
             verbose: false,
+            output_file: None,
         };
         let override_ = GeneralConfig {
             path: None,
             verbose: true,
+            output_file: None,
         };
 
         let merged = base.merge(&override_);
