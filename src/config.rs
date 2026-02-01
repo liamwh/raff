@@ -583,6 +583,11 @@ pub fn merge_contributor_report_args(
         }
     }
 
+    // Merge output_file: from general config if not set on CLI
+    if merged.output_file.is_none() {
+        merged.output_file = config.general.output_file.clone();
+    }
+
     merged
 }
 
@@ -1286,6 +1291,7 @@ verbose = true
             decay: 0.01,
             output: crate::cli::ContributorReportOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         let merged = merge_contributor_report_args(&cli_args, &config);

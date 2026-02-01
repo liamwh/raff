@@ -81,6 +81,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 
+use crate::ci_report::{Finding, Severity, ToFindings};
 use crate::error::{RaffError, Result};
 use crate::rule::Rule;
 use chrono::{DateTime, Utc};
@@ -89,7 +90,7 @@ use maud::{html, Markup};
 use prettytable::{row, Table};
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{ContributorReportArgs, ContributorReportOutputFormat};
+use crate::cli::{CiOutputFormat, ContributorReportArgs, ContributorReportOutputFormat};
 use crate::html_utils::{self, MetricRanges};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,6 +122,39 @@ impl ContributorStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContributorReportData {
     pub stats: Vec<ContributorStats>,
+}
+
+impl ToFindings for ContributorReportData {
+    fn to_findings(&self) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        for stat in &self.stats {
+            findings.push(Finding {
+                rule_id: "contributor-report".to_string(),
+                rule_name: "Contributor Report".to_string(),
+                severity: Severity::Note,
+                message: format!(
+                    "Contributor '{}' has {} commits, {} lines added, {} lines deleted, {} files touched, with score {:.2}",
+                    stat.author,
+                    stat.commit_count,
+                    stat.lines_added,
+                    stat.lines_deleted,
+                    stat.files_touched,
+                    stat.score
+                ),
+                location: None, // Contributor report is aggregate data, not file-specific
+                help_uri: Some("https://github.com/liamwh/raff/docs/contributor-report".to_string()),
+                fingerprint: Some(format!(
+                    "contributor-report:{}:{}:{}",
+                    stat.author,
+                    stat.commit_count,
+                    stat.score as u64
+                )),
+            });
+        }
+
+        findings
+    }
 }
 
 pub struct ContributorReportRule;
@@ -159,6 +193,42 @@ impl ContributorReportRule {
 
     fn run_impl(&self, args: &ContributorReportArgs) -> Result<()> {
         let data = self.analyze(args)?;
+
+        // Check for CI output first (takes precedence)
+        if let Some(ci_format) = &args.ci_output {
+            let findings = data.to_findings();
+
+            let output = match ci_format {
+                CiOutputFormat::Sarif => crate::ci_report::to_sarif(&findings)?,
+                CiOutputFormat::JUnit => {
+                    crate::ci_report::to_junit(&findings, "contributor-report")?
+                }
+            };
+
+            // Write to file if specified, otherwise stdout
+            if let Some(ref output_file) = args.output_file {
+                let mut file = File::create(output_file).map_err(|e| {
+                    RaffError::io_error(format!(
+                        "Failed to create output file {}: {}",
+                        output_file.display(),
+                        e
+                    ))
+                })?;
+                file.write_all(output.as_bytes()).map_err(|e| {
+                    RaffError::io_error(format!(
+                        "Failed to write to output file {}: {}",
+                        output_file.display(),
+                        e
+                    ))
+                })?;
+            } else {
+                println!("{output}");
+            }
+
+            // Note findings are informational - don't fail CI
+            return Ok(());
+        }
+
         self.render_report(&data, args)
     }
 
@@ -776,6 +846,7 @@ mod tests {
             decay: 0.01,
             output: ContributorReportOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         // Call the Rule trait's analyze method
@@ -811,6 +882,7 @@ mod tests {
             decay: 0.01,
             output: ContributorReportOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         // Call the Rule trait's analyze method
@@ -835,6 +907,7 @@ mod tests {
             decay: 0.01,
             output: ContributorReportOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         // Verify Data type is ContributorReportData
@@ -870,5 +943,347 @@ mod tests {
             json_str.contains("stats"),
             "JSON should contain stats field"
         );
+    }
+
+    // Tests for ToFindings trait implementation
+
+    #[test]
+    fn test_to_findings_with_empty_stats() {
+        use crate::ci_report::ToFindings;
+        let data = ContributorReportData { stats: vec![] };
+        let findings = data.to_findings();
+
+        assert!(
+            findings.is_empty(),
+            "to_findings should return empty findings for empty stats"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_with_contributor_stats() {
+        use crate::ci_report::{Severity, ToFindings};
+        let stats = vec![
+            create_test_contributor_stats("Alice", 10, 500, 200, 50, 1500.0),
+            create_test_contributor_stats("Bob", 5, 300, 100, 25, 750.0),
+        ];
+        let data = ContributorReportData { stats };
+
+        let findings = data.to_findings();
+
+        assert_eq!(
+            findings.len(),
+            2,
+            "to_findings should return one finding per contributor"
+        );
+
+        // Check Alice's finding
+        let alice_finding = findings
+            .iter()
+            .find(|f| f.message.contains("Alice"))
+            .expect("Should have a finding for Alice");
+        assert_eq!(
+            alice_finding.rule_id, "contributor-report",
+            "rule_id should be 'contributor-report'"
+        );
+        assert_eq!(
+            alice_finding.severity,
+            Severity::Note,
+            "severity should be Note (informational)"
+        );
+        assert!(
+            alice_finding.message.contains("10 commits"),
+            "message should contain commit count"
+        );
+        assert!(
+            alice_finding.message.contains("500 lines added"),
+            "message should contain lines added"
+        );
+        assert!(
+            alice_finding.message.contains("200 lines deleted"),
+            "message should contain lines deleted"
+        );
+        assert!(
+            alice_finding.location.is_none(),
+            "location should be None (aggregate data)"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_note_severity() {
+        use crate::ci_report::{Severity, ToFindings};
+        let stats = vec![create_test_contributor_stats(
+            "Charlie", 15, 750, 300, 75, 3000.0,
+        )];
+        let data = ContributorReportData { stats };
+
+        let findings = data.to_findings();
+
+        assert_eq!(findings.len(), 1, "should have exactly one finding");
+        assert_eq!(
+            findings[0].severity,
+            Severity::Note,
+            "contributor report should use Note severity (informational)"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_fingerprint_includes_author_and_score() {
+        use crate::ci_report::ToFindings;
+        let stats = vec![create_test_contributor_stats(
+            "Dave", 20, 1000, 400, 100, 5000.0,
+        )];
+        let data = ContributorReportData { stats };
+
+        let findings = data.to_findings();
+
+        assert_eq!(findings.len(), 1, "should have exactly one finding");
+        assert!(
+            findings[0].fingerprint.is_some(),
+            "fingerprint should be present"
+        );
+        let fingerprint = findings[0].fingerprint.as_ref().unwrap();
+        assert!(
+            fingerprint.contains("Dave"),
+            "fingerprint should contain author name"
+        );
+        assert!(
+            fingerprint.contains("20"),
+            "fingerprint should contain commit count"
+        );
+        assert!(
+            fingerprint.contains("5000"),
+            "fingerprint should contain score"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_message_contains_all_metrics() {
+        use crate::ci_report::ToFindings;
+        let stats = vec![create_test_contributor_stats(
+            "Eve", 30, 1500, 600, 120, 8000.0,
+        )];
+        let data = ContributorReportData { stats };
+
+        let findings = data.to_findings();
+
+        assert_eq!(findings.len(), 1, "should have exactly one finding");
+        let message = &findings[0].message;
+        assert!(
+            message.contains("Eve"),
+            "message should contain author name"
+        );
+        assert!(
+            message.contains("30 commits"),
+            "message should contain commit count"
+        );
+        assert!(
+            message.contains("1500 lines added"),
+            "message should contain lines added"
+        );
+        assert!(
+            message.contains("600 lines deleted"),
+            "message should contain lines deleted"
+        );
+        assert!(
+            message.contains("120 files touched"),
+            "message should contain files touched"
+        );
+        assert!(message.contains("8000.00"), "message should contain score");
+    }
+
+    // Tests for CI output handling
+
+    #[test]
+    fn test_run_with_ci_output_sarif_succeeds() {
+        use crate::cli::CiOutputFormat;
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let repo_path = temp_dir.path();
+
+        // Initialize a git repository
+        git2::Repository::init(repo_path).expect("Failed to initialize git repo");
+
+        // Create a test file and commit
+        std::fs::write(repo_path.join("test.txt"), "test content")
+            .expect("Failed to write test file");
+
+        let repo = git2::Repository::open(repo_path).expect("Failed to open repo");
+        let mut index = repo.index().expect("Failed to get index");
+        index
+            .add_path(std::path::Path::new("test.txt"))
+            .expect("Failed to add path");
+        index.write().expect("Failed to write index");
+
+        let tree_id = index.write_tree().expect("Failed to write tree");
+        let tree = repo.find_tree(tree_id).expect("Failed to find tree");
+
+        let sig = git2::Signature::now("Test Author", "test@example.com")
+            .expect("Failed to create signature");
+
+        repo.commit(Some("HEAD"), &sig, &sig, "Test commit", &tree, &[])
+            .expect("Failed to create commit");
+
+        let rule = ContributorReportRule::new();
+        let args = ContributorReportArgs {
+            path: repo_path.to_path_buf(),
+            since: None,
+            decay: 0.01,
+            output: ContributorReportOutputFormat::Table,
+            ci_output: Some(CiOutputFormat::Sarif),
+            output_file: None,
+        };
+
+        let result = rule.run_impl(&args);
+
+        assert!(
+            result.is_ok(),
+            "CI output SARIF should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_run_with_ci_output_junit_succeeds() {
+        use crate::cli::CiOutputFormat;
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let repo_path = temp_dir.path();
+
+        // Initialize a git repository
+        git2::Repository::init(repo_path).expect("Failed to initialize git repo");
+
+        // Create a test file and commit
+        std::fs::write(repo_path.join("test.txt"), "test content")
+            .expect("Failed to write test file");
+
+        let repo = git2::Repository::open(repo_path).expect("Failed to open repo");
+        let mut index = repo.index().expect("Failed to get index");
+        index
+            .add_path(std::path::Path::new("test.txt"))
+            .expect("Failed to add path");
+        index.write().expect("Failed to write index");
+
+        let tree_id = index.write_tree().expect("Failed to write tree");
+        let tree = repo.find_tree(tree_id).expect("Failed to find tree");
+
+        let sig = git2::Signature::now("Test Author", "test@example.com")
+            .expect("Failed to create signature");
+
+        repo.commit(Some("HEAD"), &sig, &sig, "Test commit", &tree, &[])
+            .expect("Failed to create commit");
+
+        let rule = ContributorReportRule::new();
+        let args = ContributorReportArgs {
+            path: repo_path.to_path_buf(),
+            since: None,
+            decay: 0.01,
+            output: ContributorReportOutputFormat::Table,
+            ci_output: Some(CiOutputFormat::JUnit),
+            output_file: None,
+        };
+
+        let result = rule.run_impl(&args);
+
+        assert!(
+            result.is_ok(),
+            "CI output JUnit should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_run_with_ci_output_does_not_fail_on_notes() {
+        use crate::cli::CiOutputFormat;
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let repo_path = temp_dir.path();
+
+        // Initialize a git repository
+        git2::Repository::init(repo_path).expect("Failed to initialize git repo");
+
+        // Create a test file and commit
+        std::fs::write(repo_path.join("test.txt"), "test content")
+            .expect("Failed to write test file");
+
+        let repo = git2::Repository::open(repo_path).expect("Failed to open repo");
+        let mut index = repo.index().expect("Failed to get index");
+        index
+            .add_path(std::path::Path::new("test.txt"))
+            .expect("Failed to add path");
+        index.write().expect("Failed to write index");
+
+        let tree_id = index.write_tree().expect("Failed to write tree");
+        let tree = repo.find_tree(tree_id).expect("Failed to find tree");
+
+        let sig = git2::Signature::now("Test Author", "test@example.com")
+            .expect("Failed to create signature");
+
+        repo.commit(Some("HEAD"), &sig, &sig, "Test commit", &tree, &[])
+            .expect("Failed to create commit");
+
+        let rule = ContributorReportRule::new();
+        let args = ContributorReportArgs {
+            path: repo_path.to_path_buf(),
+            since: None,
+            decay: 0.01,
+            output: ContributorReportOutputFormat::Table,
+            ci_output: Some(CiOutputFormat::Sarif),
+            output_file: None,
+        };
+
+        let result = rule.run_impl(&args);
+
+        assert!(
+            result.is_ok(),
+            "CI output with Note findings should not fail: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_run_with_ci_output_and_output_file_succeeds() {
+        use crate::cli::CiOutputFormat;
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let repo_path = temp_dir.path();
+        let output_file = temp_dir.path().join("output.sarif.json");
+
+        // Initialize a git repository
+        git2::Repository::init(repo_path).expect("Failed to initialize git repo");
+
+        // Create a test file and commit
+        std::fs::write(repo_path.join("test.txt"), "test content")
+            .expect("Failed to write test file");
+
+        let repo = git2::Repository::open(repo_path).expect("Failed to open repo");
+        let mut index = repo.index().expect("Failed to get index");
+        index
+            .add_path(std::path::Path::new("test.txt"))
+            .expect("Failed to add path");
+        index.write().expect("Failed to write index");
+
+        let tree_id = index.write_tree().expect("Failed to write tree");
+        let tree = repo.find_tree(tree_id).expect("Failed to find tree");
+
+        let sig = git2::Signature::now("Test Author", "test@example.com")
+            .expect("Failed to create signature");
+
+        repo.commit(Some("HEAD"), &sig, &sig, "Test commit", &tree, &[])
+            .expect("Failed to create commit");
+
+        let rule = ContributorReportRule::new();
+        let args = ContributorReportArgs {
+            path: repo_path.to_path_buf(),
+            since: None,
+            decay: 0.01,
+            output: ContributorReportOutputFormat::Table,
+            ci_output: Some(CiOutputFormat::Sarif),
+            output_file: Some(output_file.clone()),
+        };
+
+        let result = rule.run_impl(&args);
+
+        assert!(
+            result.is_ok(),
+            "CI output with file should succeed: {:?}",
+            result.err()
+        );
+        assert!(output_file.exists(), "output file should be created");
     }
 }

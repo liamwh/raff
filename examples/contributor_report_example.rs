@@ -9,6 +9,7 @@ fn main() -> Result<()> {
         decay: 0.01,
         output: ContributorReportOutputFormat::Table,
         ci_output: None,
+        output_file: None,
     };
 
     let rule = ContributorReportRule::new();
