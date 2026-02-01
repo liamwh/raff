@@ -35,6 +35,7 @@
 //!     output: CouplingOutputFormat::Table,
 //!     granularity: CouplingGranularity::Both,
 //!     ci_output: None,
+//!     output_file: None,
 //! };
 //!
 //! if let Err(e) = rule.run(&args) {
@@ -80,21 +81,22 @@
 //! - `cargo metadata` fails to execute or returns invalid output
 //! - Git operations fail for repository-level analysis
 
+use crate::ci_report::{Finding, Severity, ToFindings};
+use crate::cli::{CiOutputFormat, CouplingArgs, CouplingGranularity, CouplingOutputFormat};
 use crate::error::{RaffError, Result};
+use crate::html_utils;
 use crate::rule::Rule;
+use crate::table_utils::get_default_table_format;
 use maud::{html, Markup};
 use prettytable::{Cell, Row, Table};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use syn::{visit::Visit, ExprPath, Item, ItemMod, ItemUse, PatType};
 use walkdir::WalkDir;
-
-use crate::cli::{CouplingArgs, CouplingGranularity, CouplingOutputFormat};
-use crate::html_utils;
-use crate::table_utils::get_default_table_format;
 
 #[derive(Debug, Deserialize, Clone)]
 struct CargoMetadata {
@@ -163,6 +165,44 @@ pub struct CouplingData {
     pub analysis_path: PathBuf,
 }
 
+impl ToFindings for CouplingData {
+    #[tracing::instrument(skip(self), fields(rule_id = "coupling"))]
+    fn to_findings(&self) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        // Generate findings for crates with high instability (I > 0.7)
+        // Instability I = Ce / (Ce + Ca)
+        // I > 0.7 means the crate is highly unstable (depends on many others, few depend on it)
+        for crate_data in &self.crates {
+            let total_coupling = crate_data.ce + crate_data.ca;
+            if total_coupling > 0 {
+                let instability = crate_data.ce as f64 / total_coupling as f64;
+                if instability > 0.7 {
+                    findings.push(Finding {
+                        rule_id: "coupling".to_string(),
+                        rule_name: "Code Coupling Rule".to_string(),
+                        severity: Severity::Warning,
+                        message: format!(
+                            "Crate '{}' has high instability ({:.2}): Ce={} (outgoing dependencies), Ca={} (incoming dependents)",
+                            crate_data.name, instability, crate_data.ce, crate_data.ca
+                        ),
+                        location: None, // Coupling is crate-level, no specific file location
+                        help_uri: Some(
+                            "https://github.com/liamwh/raff/docs/coupling".to_string(),
+                        ),
+                        fingerprint: Some(format!(
+                            "coupling:{}:{}:{}",
+                            crate_data.name, crate_data.ce, crate_data.ca
+                        )),
+                    });
+                }
+            }
+        }
+
+        findings
+    }
+}
+
 pub struct CouplingRule;
 
 impl Rule for CouplingRule {
@@ -200,6 +240,40 @@ impl CouplingRule {
     #[tracing::instrument(level = "debug", skip(self, args), ret)]
     fn run_impl(&self, args: &CouplingArgs) -> Result<()> {
         let full_report = self.analyze(args)?;
+
+        // Check for CI output first (takes precedence)
+        if let Some(ci_format) = &args.ci_output {
+            let findings = full_report.to_findings();
+
+            let output = match ci_format {
+                CiOutputFormat::Sarif => crate::ci_report::to_sarif(&findings)?,
+                CiOutputFormat::JUnit => crate::ci_report::to_junit(&findings, "coupling")?,
+            };
+
+            // Write to file if specified, otherwise stdout
+            if let Some(ref output_file) = args.output_file {
+                let mut file = fs::File::create(output_file).map_err(|e| {
+                    RaffError::io_error(format!(
+                        "Failed to create output file {}: {}",
+                        output_file.display(),
+                        e
+                    ))
+                })?;
+                file.write_all(output.as_bytes()).map_err(|e| {
+                    RaffError::io_error(format!(
+                        "Failed to write to output file {}: {}",
+                        output_file.display(),
+                        e
+                    ))
+                })?;
+            } else {
+                println!("{output}");
+            }
+
+            // Note: Coupling uses Severity::Warning, which doesn't fail CI
+            // We always return Ok for coupling warnings
+            return Ok(());
+        }
 
         match args.output {
             CouplingOutputFormat::Table => {
@@ -1769,6 +1843,7 @@ fn main() {
             output: CouplingOutputFormat::Table,
             granularity: CouplingGranularity::Crate,
             ci_output: None,
+            output_file: None,
         };
 
         // Call the Rule trait's run method
@@ -1814,6 +1889,7 @@ fn main() {
             output: CouplingOutputFormat::Table,
             granularity: CouplingGranularity::Crate,
             ci_output: None,
+            output_file: None,
         };
 
         // Call the Rule trait's analyze method
@@ -1847,6 +1923,7 @@ fn main() {
             output: CouplingOutputFormat::Table,
             granularity: CouplingGranularity::Crate,
             ci_output: None,
+            output_file: None,
         };
 
         // Call the Rule trait's analyze method
@@ -1870,6 +1947,7 @@ fn main() {
             output: CouplingOutputFormat::Table,
             granularity: CouplingGranularity::Crate,
             ci_output: None,
+            output_file: None,
         };
 
         // Verify Data type is CouplingData
@@ -1879,5 +1957,329 @@ fn main() {
 
         // Verify run and analyze work with these types
         let _ = rule;
+    }
+
+    // Tests for CI output functionality
+
+    #[test]
+    fn test_to_findings_with_no_high_instability_crates() {
+        let data = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "stable_crate".to_string(),
+                ce: 2,
+                ca: 8, // I = 2/10 = 0.2 (stable, below 0.7 threshold)
+                modules: Vec::new(),
+                dependencies: HashSet::new(),
+            }],
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test"),
+        };
+
+        let findings = data.to_findings();
+
+        assert!(
+            findings.is_empty(),
+            "to_findings should return empty when no crates have high instability"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_with_high_instability_crates() {
+        let data = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "unstable_crate".to_string(),
+                ce: 8,
+                ca: 2, // I = 8/10 = 0.8 (unstable, above 0.7 threshold)
+                modules: Vec::new(),
+                dependencies: {
+                    let mut deps = HashSet::new();
+                    deps.insert("dep1".to_string());
+                    deps
+                },
+            }],
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test"),
+        };
+
+        let findings = data.to_findings();
+
+        assert!(
+            !findings.is_empty(),
+            "to_findings should return findings when crates have high instability"
+        );
+
+        let finding = &findings[0];
+        assert_eq!(finding.rule_id, "coupling");
+        assert_eq!(finding.rule_name, "Code Coupling Rule");
+        assert_eq!(finding.severity, Severity::Warning);
+        assert!(
+            finding.message.contains("high instability"),
+            "finding message should mention high instability"
+        );
+        assert!(
+            finding.message.contains("unstable_crate"),
+            "finding message should mention the crate name"
+        );
+        assert!(
+            finding.fingerprint.is_some(),
+            "finding should have a fingerprint for deduplication"
+        );
+        assert!(
+            finding.location.is_none(),
+            "finding location should be None since coupling is crate-level"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_warning_severity() {
+        let data = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "test_crate".to_string(),
+                ce: 10,
+                ca: 0, // I = 1.0 (completely unstable)
+                modules: Vec::new(),
+                dependencies: HashSet::new(),
+            }],
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test"),
+        };
+
+        let findings = data.to_findings();
+
+        assert_eq!(findings.len(), 1, "should have one finding");
+        assert_eq!(
+            findings[0].severity,
+            Severity::Warning,
+            "finding should have Warning severity"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_fingerprint_includes_crate_and_coupling() {
+        let data = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "my_crate".to_string(),
+                ce: 8,
+                ca: 2, // I = 8/10 = 0.8 (above 0.7 threshold)
+                modules: Vec::new(),
+                dependencies: HashSet::new(),
+            }],
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test"),
+        };
+
+        let findings = data.to_findings();
+
+        assert!(!findings.is_empty(), "should have at least one finding");
+
+        let fingerprint = findings[0]
+            .fingerprint
+            .as_ref()
+            .expect("should have fingerprint");
+        assert!(
+            fingerprint.contains("coupling:my_crate:8:2"),
+            "fingerprint should contain rule id, crate name, ce, and ca"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_multiple_crates_mixed_instability() {
+        let data = CouplingData {
+            crates: vec![
+                CrateCoupling {
+                    name: "stable_crate".to_string(),
+                    ce: 1,
+                    ca: 9, // I = 0.1 (stable)
+                    modules: Vec::new(),
+                    dependencies: HashSet::new(),
+                },
+                CrateCoupling {
+                    name: "unstable_crate".to_string(),
+                    ce: 9,
+                    ca: 1, // I = 0.9 (unstable)
+                    modules: Vec::new(),
+                    dependencies: HashSet::new(),
+                },
+            ],
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test"),
+        };
+
+        let findings = data.to_findings();
+
+        assert_eq!(
+            findings.len(),
+            1,
+            "should only have one finding for the unstable crate"
+        );
+        assert_eq!(
+            findings[0].rule_id, "coupling",
+            "finding should have correct rule_id"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_with_zero_total_coupling() {
+        let data = CouplingData {
+            crates: vec![CrateCoupling {
+                name: "isolated_crate".to_string(),
+                ce: 0,
+                ca: 0, // I = 0/0 = undefined, should not generate finding
+                modules: Vec::new(),
+                dependencies: HashSet::new(),
+            }],
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test"),
+        };
+
+        let findings = data.to_findings();
+
+        assert!(
+            findings.is_empty(),
+            "to_findings should return empty for crates with zero total coupling"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_empty_crates() {
+        let data = CouplingData {
+            crates: Vec::new(),
+            granularity: CouplingGranularity::Crate,
+            analysis_path: PathBuf::from("/test"),
+        };
+
+        let findings = data.to_findings();
+
+        assert!(
+            findings.is_empty(),
+            "to_findings should return empty when there are no crates"
+        );
+    }
+
+    #[test]
+    fn test_run_with_ci_output_sarif_succeeds() {
+        // Create a minimal test directory structure
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        // Create a minimal Cargo.toml
+        let cargo_toml = r#"
+[package]
+name = "test-crate"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+"#;
+        fs::write(temp_dir.path().join("Cargo.toml"), cargo_toml)
+            .expect("Failed to write Cargo.toml");
+
+        // Create a simple main.rs file
+        let main_rs = r#"
+fn main() {
+    println!("Hello, world!");
+}
+"#;
+        fs::write(src_dir.join("main.rs"), main_rs).expect("Failed to write main.rs");
+
+        let rule = CouplingRule::new();
+        let args = CouplingArgs {
+            path: temp_dir.path().to_path_buf(),
+            output: CouplingOutputFormat::Table,
+            granularity: CouplingGranularity::Crate,
+            ci_output: Some(CiOutputFormat::Sarif),
+            output_file: None,
+        };
+
+        let result = rule.run(&args);
+
+        assert!(result.is_ok(), "run with SARIF CI output should succeed");
+    }
+
+    #[test]
+    fn test_run_with_ci_output_junit_succeeds() {
+        // Create a minimal test directory structure
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        // Create a minimal Cargo.toml
+        let cargo_toml = r#"
+[package]
+name = "test-crate"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+"#;
+        fs::write(temp_dir.path().join("Cargo.toml"), cargo_toml)
+            .expect("Failed to write Cargo.toml");
+
+        // Create a simple main.rs file
+        let main_rs = r#"
+fn main() {
+    println!("Hello, world!");
+}
+"#;
+        fs::write(src_dir.join("main.rs"), main_rs).expect("Failed to write main.rs");
+
+        let rule = CouplingRule::new();
+        let args = CouplingArgs {
+            path: temp_dir.path().to_path_buf(),
+            output: CouplingOutputFormat::Table,
+            granularity: CouplingGranularity::Crate,
+            ci_output: Some(CiOutputFormat::JUnit),
+            output_file: None,
+        };
+
+        let result = rule.run(&args);
+
+        assert!(result.is_ok(), "run with JUnit CI output should succeed");
+    }
+
+    #[test]
+    fn test_run_with_ci_output_does_not_fail_on_warnings() {
+        // Create a minimal test directory structure
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        // Create a minimal Cargo.toml
+        let cargo_toml = r#"
+[package]
+name = "test-crate"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+"#;
+        fs::write(temp_dir.path().join("Cargo.toml"), cargo_toml)
+            .expect("Failed to write Cargo.toml");
+
+        // Create a simple main.rs file
+        let main_rs = r#"
+fn main() {
+    println!("Hello, world!");
+}
+"#;
+        fs::write(src_dir.join("main.rs"), main_rs).expect("Failed to write main.rs");
+
+        let rule = CouplingRule::new();
+        let args = CouplingArgs {
+            path: temp_dir.path().to_path_buf(),
+            output: CouplingOutputFormat::Table,
+            granularity: CouplingGranularity::Crate,
+            ci_output: Some(CiOutputFormat::Sarif),
+            output_file: None,
+        };
+
+        let result = rule.run(&args);
+
+        // Coupling uses Warning severity, so it should not fail even with findings
+        assert!(
+            result.is_ok(),
+            "run with CI output should succeed even with warnings"
+        );
     }
 }

@@ -8,6 +8,7 @@ fn main() -> Result<()> {
         output: CouplingOutputFormat::Table,
         granularity: CouplingGranularity::Module,
         ci_output: None,
+        output_file: None,
     };
 
     let rule = CouplingRule::new();

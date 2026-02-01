@@ -135,6 +135,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         granularity: args.coup_granularity.clone(),
         output: crate::cli::CouplingOutputFormat::Table, // format is irrelevant for analyze
         ci_output: None,
+        output_file: None,
     };
     let rca_args = crate::cli::RustCodeAnalysisArgs {
         path: args.path.clone(),
@@ -291,6 +292,7 @@ mod tests {
             granularity: CouplingGranularity::Both,
             output: CouplingOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         }
     }
 
@@ -560,6 +562,7 @@ mod tests {
             granularity: all_args.coup_granularity.clone(),
             output: CouplingOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         assert_eq!(

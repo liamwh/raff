@@ -455,6 +455,11 @@ pub fn merge_coupling_args(
         }
     }
 
+    // Merge output_file: CLI takes precedence if set, otherwise use config
+    if merged.output_file.is_none() {
+        merged.output_file = config.general.output_file.clone();
+    }
+
     merged
 }
 
@@ -1220,6 +1225,7 @@ verbose = true
             output: crate::cli::CouplingOutputFormat::Table,
             granularity: crate::cli::CouplingGranularity::Both,
             ci_output: None,
+            output_file: None,
         };
 
         let merged = merge_coupling_args(&cli_args, &config);
