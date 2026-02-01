@@ -1,0 +1,5 @@
+---
+source: tests/ci_junit_golden.rs
+expression: xml
+---
+<?xml version="1.0" encoding="UTF-8"?><testsuites name="raff-test-suite" tests="3" failures="1" errors="0" skipped="0"><testsuite name="raff-test-suite" tests="3" failures="1" errors="0" skipped="0"><testcase name="Component &apos;src&apos; exceeds threshold" classname="raff.statement-count"><failure message="src/main.rs: Component &apos;src&apos; exceeds threshold"></failure></testcase><testcase name="Crate &apos;my-crate&apos; has high volatility" classname="raff.volatility"><system-out>Crate &apos;my-crate&apos; has high volatility</system-out>><testcase name="File metrics collected" classname="raff.rust-code-analysis"/></testsuite></testsuites>

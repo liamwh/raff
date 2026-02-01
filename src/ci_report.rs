@@ -229,7 +229,9 @@ pub fn to_sarif(findings: &[Finding]) -> Result<String> {
             });
     }
 
-    let rules: Vec<SarifRule> = unique_rules.into_values().collect();
+    // Sort rules by ID for deterministic output
+    let mut rules: Vec<SarifRule> = unique_rules.into_values().collect();
+    rules.sort_by(|a, b| a.id.cmp(&b.id));
 
     let sarif_results: Vec<SarifResult> = findings.iter().map(SarifResult::from_finding).collect();
 

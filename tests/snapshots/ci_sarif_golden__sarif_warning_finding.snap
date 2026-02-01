@@ -1,0 +1,37 @@
+---
+source: tests/ci_sarif_golden.rs
+expression: json
+---
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "raff",
+          "version": "0.1.3",
+          "rules": [
+            {
+              "id": "volatility",
+              "name": "Volatility Rule",
+              "helpUri": "https://github.com/liamwh/raff/docs/volatility"
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "volatility",
+          "level": "warning",
+          "message": {
+            "text": "Crate 'my-crate' has high volatility: raw_score=0.85 (alpha=0.01)"
+          },
+          "partialFingerprints": {
+            "primaryLocation": "volatility:my-crate:0.01:0.85"
+          }
+        }
+      ]
+    }
+  ]
+}

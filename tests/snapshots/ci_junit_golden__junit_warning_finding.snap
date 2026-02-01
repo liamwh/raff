@@ -1,0 +1,6 @@
+---
+source: tests/ci_junit_golden.rs
+expression: xml
+---
+<?xml version="1.0" encoding="UTF-8"?><testsuites name="raff-test-suite" tests="1" failures="0" errors="0" skipped="0"><testsuite name="raff-test-suite" tests="1" failures="0" errors="0" skipped="0"><testcase name="Crate &apos;my-crate&apos; has high volatility: raw_score=0.85 (alpha=0.01)" classname="raff.volatility"><system-out>Crate &apos;my-crate&apos; has high volatility: raw_score=0.85 (alpha=0.01)
+Help: https://github.com/liamwh/raff/docs/volatility</system-out>></testsuite></testsuites>

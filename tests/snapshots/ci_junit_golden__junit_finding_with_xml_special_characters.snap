@@ -1,0 +1,5 @@
+---
+source: tests/ci_junit_golden.rs
+expression: xml
+---
+<?xml version="1.0" encoding="UTF-8"?><testsuites name="raff-test-suite" tests="1" failures="1" errors="0" skipped="0"><testsuite name="raff-test-suite" tests="1" failures="1" errors="0" skipped="0"><testcase name="Error: value &lt; threshold &amp; condition &gt; expected" classname="raff.test-rule"><failure message="src/test.rs: Error: value &lt; threshold &amp; condition &gt; expected"></failure></testcase></testsuite></testsuites>

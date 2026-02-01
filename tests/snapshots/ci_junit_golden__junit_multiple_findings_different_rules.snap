@@ -1,0 +1,9 @@
+---
+source: tests/ci_junit_golden.rs
+expression: xml
+---
+<?xml version="1.0" encoding="UTF-8"?><testsuites name="raff-test-suite" tests="3" failures="1" errors="0" skipped="0"><testsuite name="raff-test-suite" tests="3" failures="1" errors="0" skipped="0"><testcase name="Component &apos;src&apos; has 5000 statements (25%), exceeding threshold of 20%" classname="raff.statement-count"><failure message="src/main.rs: Component &apos;src&apos; has 5000 statements (25%), exceeding threshold of 20%">
+Help: https://github.com/liamwh/raff/docs/statement-count
+</failure></testcase><testcase name="Crate &apos;my-crate&apos; has high volatility: raw_score=0.85 (alpha=0.01)" classname="raff.volatility"><system-out>Crate &apos;my-crate&apos; has high volatility: raw_score=0.85 (alpha=0.01)
+Help: https://github.com/liamwh/raff/docs/volatility</system-out>><testcase name="Crate &apos;api&apos; has high instability: Ce=15, Ca=5, I=0.75" classname="raff.coupling"><system-out>Crate &apos;api&apos; has high instability: Ce=15, Ca=5, I=0.75
+Help: https://github.com/liamwh/raff/docs/coupling</system-out>></testsuite></testsuites>

@@ -1,0 +1,5 @@
+---
+source: tests/ci_junit_golden.rs
+expression: xml
+---
+<?xml version="1.0" encoding="UTF-8"?><testsuites name="raff-test-suite" tests="1" failures="0" errors="0" skipped="0"><testsuite name="raff-test-suite" tests="1" failures="0" errors="0" skipped="0"><testcase name="Contributor &apos;alice@example.com&apos; statistics: 50 commits, 5000 lines added, 2000 lines deleted" classname="raff.contributor-report"/></testsuite></testsuites>

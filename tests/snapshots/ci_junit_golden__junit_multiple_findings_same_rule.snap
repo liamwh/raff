@@ -1,0 +1,9 @@
+---
+source: tests/ci_junit_golden.rs
+expression: xml
+---
+<?xml version="1.0" encoding="UTF-8"?><testsuites name="raff-test-suite" tests="2" failures="2" errors="0" skipped="0"><testsuite name="raff-test-suite" tests="2" failures="2" errors="0" skipped="0"><testcase name="Component &apos;src&apos; has 5000 statements (25%), exceeding threshold of 20%" classname="raff.statement-count"><failure message="src/main.rs: Component &apos;src&apos; has 5000 statements (25%), exceeding threshold of 20%">
+Help: https://github.com/liamwh/raff/docs/statement-count
+</failure></testcase><testcase name="Component &apos;tests&apos; has 3000 statements (15%), exceeding threshold of 10%" classname="raff.statement-count"><failure message="tests/integration_test.rs: Component &apos;tests&apos; has 3000 statements (15%), exceeding threshold of 10%">
+Help: https://github.com/liamwh/raff/docs/statement-count
+</failure></testcase></testsuite></testsuites>

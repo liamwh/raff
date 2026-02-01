@@ -1,0 +1,33 @@
+---
+source: tests/ci_sarif_golden.rs
+expression: json
+---
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "raff",
+          "version": "0.1.3",
+          "rules": [
+            {
+              "id": "contributor-report",
+              "name": "Contributor Report"
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "contributor-report",
+          "level": "note",
+          "message": {
+            "text": "Contributor 'alice@example.com' statistics: 50 commits, 5000 lines added, 2000 lines deleted"
+          }
+        }
+      ]
+    }
+  ]
+}
