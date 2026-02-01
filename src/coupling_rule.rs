@@ -1767,6 +1767,7 @@ fn main() {
             path: temp_dir.path().to_path_buf(),
             output: CouplingOutputFormat::Table,
             granularity: CouplingGranularity::Crate,
+            ci_output: None,
         };
 
         // Call the Rule trait's run method
@@ -1811,6 +1812,7 @@ fn main() {
             path: temp_dir.path().to_path_buf(),
             output: CouplingOutputFormat::Table,
             granularity: CouplingGranularity::Crate,
+            ci_output: None,
         };
 
         // Call the Rule trait's analyze method
@@ -1843,6 +1845,7 @@ fn main() {
             path: fake_path,
             output: CouplingOutputFormat::Table,
             granularity: CouplingGranularity::Crate,
+            ci_output: None,
         };
 
         // Call the Rule trait's analyze method
@@ -1865,6 +1868,7 @@ fn main() {
             path: PathBuf::from("."),
             output: CouplingOutputFormat::Table,
             granularity: CouplingGranularity::Crate,
+            ci_output: None,
         };
 
         // Verify Data type is CouplingData

@@ -419,6 +419,7 @@ pub fn func_b() {
             path,
             threshold: 10,
             output: StatementCountOutputFormat::Table,
+            ci_output: None,
         }
     }
 
@@ -838,6 +839,7 @@ pub fn func_b() {
             path: PathBuf::from("."),
             threshold: 10,
             output: StatementCountOutputFormat::Table,
+            ci_output: None,
         };
 
         // Verify Data type is StatementCountData

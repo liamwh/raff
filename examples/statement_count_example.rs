@@ -7,6 +7,7 @@ fn main() -> Result<()> {
         path: PathBuf::from("."),
         threshold: 10,
         output: StatementCountOutputFormat::Table,
+        ci_output: None,
     };
 
     let rule = StatementCountRule::new();

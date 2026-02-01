@@ -1098,6 +1098,7 @@ fn main() {
             normalize: false,
             output: VolatilityOutputFormat::Table,
             skip_merges: false,
+            ci_output: None,
         }
     }
 
@@ -1940,6 +1941,7 @@ edition = "2021"
             normalize: false,
             output: VolatilityOutputFormat::Table,
             skip_merges: false,
+            ci_output: None,
         };
 
         // Verify Data type is VolatilityData

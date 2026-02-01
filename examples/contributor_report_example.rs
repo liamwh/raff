@@ -8,6 +8,7 @@ fn main() -> Result<()> {
         since: None,
         decay: 0.01,
         output: ContributorReportOutputFormat::Table,
+        ci_output: None,
     };
 
     let rule = ContributorReportRule::new();

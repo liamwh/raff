@@ -10,6 +10,7 @@ fn main() -> Result<()> {
         output: RustCodeAnalysisOutputFormat::Table,
         metrics: true,
         language: "rust".to_string(),
+        ci_output: None,
     };
 
     let rule = RustCodeAnalysisRule::new();

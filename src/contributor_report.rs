@@ -774,6 +774,7 @@ mod tests {
             since: None,
             decay: 0.01,
             output: ContributorReportOutputFormat::Table,
+            ci_output: None,
         };
 
         // Call the Rule trait's analyze method
@@ -808,6 +809,7 @@ mod tests {
             since: None,
             decay: 0.01,
             output: ContributorReportOutputFormat::Table,
+            ci_output: None,
         };
 
         // Call the Rule trait's analyze method
@@ -831,6 +833,7 @@ mod tests {
             since: None,
             decay: 0.01,
             output: ContributorReportOutputFormat::Table,
+            ci_output: None,
         };
 
         // Verify Data type is ContributorReportData

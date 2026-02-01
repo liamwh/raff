@@ -85,10 +85,10 @@ pub mod volatility_rule;
 // Public API exports
 pub use crate::all_rules::run_all;
 pub use crate::cli::{
-    AllArgs, AllOutputFormat, Cli, Commands, ContributorReportArgs, ContributorReportOutputFormat,
-    CouplingArgs, CouplingGranularity, CouplingOutputFormat, RustCodeAnalysisArgs,
-    RustCodeAnalysisOutputFormat, StatementCountArgs, StatementCountOutputFormat, VolatilityArgs,
-    VolatilityOutputFormat,
+    AllArgs, AllOutputFormat, CiOutputFormat, Cli, Commands, ContributorReportArgs,
+    ContributorReportOutputFormat, CouplingArgs, CouplingGranularity, CouplingOutputFormat,
+    RustCodeAnalysisArgs, RustCodeAnalysisOutputFormat, StatementCountArgs,
+    StatementCountOutputFormat, VolatilityArgs, VolatilityOutputFormat,
 };
 pub use crate::contributor_report::ContributorReportRule;
 pub use crate::coupling_rule::CouplingRule;

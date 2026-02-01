@@ -116,6 +116,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         path: args.path.clone(),
         threshold: args.sc_threshold,
         output: crate::cli::StatementCountOutputFormat::Table, // format is irrelevant for analyze
+        ci_output: None,
     };
     let vol_args = crate::cli::VolatilityArgs {
         path: args.path.clone(),
@@ -124,11 +125,13 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         normalize: args.vol_normalize,
         skip_merges: args.vol_skip_merges,
         output: crate::cli::VolatilityOutputFormat::Table, // format is irrelevant for analyze
+        ci_output: None,
     };
     let coup_args = crate::cli::CouplingArgs {
         path: args.path.clone(),
         granularity: args.coup_granularity.clone(),
         output: crate::cli::CouplingOutputFormat::Table, // format is irrelevant for analyze
+        ci_output: None,
     };
     let rca_args = crate::cli::RustCodeAnalysisArgs {
         path: args.path.clone(),
@@ -137,6 +140,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         metrics: args.rca_metrics,
         language: args.rca_language.clone(),
         output: crate::cli::RustCodeAnalysisOutputFormat::Table, // format is irrelevant for analyze
+        ci_output: None,
     };
 
     let all_data = AllReportData {
@@ -241,6 +245,7 @@ mod tests {
             rca_jobs: 1,
             rca_metrics: true,
             rca_language: "rust".to_string(),
+            ci_output: None,
         }
     }
 
@@ -254,6 +259,7 @@ mod tests {
             path: PathBuf::from(path),
             threshold,
             output: crate::cli::StatementCountOutputFormat::Table,
+            ci_output: None,
         }
     }
 
@@ -267,6 +273,7 @@ mod tests {
             normalize: false,
             skip_merges: false,
             output: crate::cli::VolatilityOutputFormat::Table,
+            ci_output: None,
         }
     }
 
@@ -278,6 +285,7 @@ mod tests {
             path: PathBuf::from(path),
             granularity: CouplingGranularity::Both,
             output: CouplingOutputFormat::Table,
+            ci_output: None,
         }
     }
 
@@ -291,6 +299,7 @@ mod tests {
             metrics: true,
             language: "rust".to_string(),
             output: crate::cli::RustCodeAnalysisOutputFormat::Table,
+            ci_output: None,
         }
     }
 
@@ -476,6 +485,7 @@ mod tests {
             path: all_args.path.clone(),
             threshold: all_args.sc_threshold,
             output: crate::cli::StatementCountOutputFormat::Table,
+            ci_output: None,
         };
 
         assert_eq!(
@@ -507,6 +517,7 @@ mod tests {
             normalize: all_args.vol_normalize,
             skip_merges: all_args.vol_skip_merges,
             output: crate::cli::VolatilityOutputFormat::Table,
+            ci_output: None,
         };
 
         assert_eq!(
@@ -541,6 +552,7 @@ mod tests {
             path: all_args.path.clone(),
             granularity: all_args.coup_granularity.clone(),
             output: CouplingOutputFormat::Table,
+            ci_output: None,
         };
 
         assert_eq!(
@@ -569,6 +581,7 @@ mod tests {
             metrics: all_args.rca_metrics,
             language: all_args.rca_language.clone(),
             output: crate::cli::RustCodeAnalysisOutputFormat::Table,
+            ci_output: None,
         };
 
         assert_eq!(
@@ -608,6 +621,7 @@ mod tests {
             normalize: all_args.vol_normalize,
             skip_merges: all_args.vol_skip_merges,
             output: VolatilityOutputFormat::Table,
+            ci_output: None,
         };
 
         assert_eq!(
@@ -629,6 +643,7 @@ mod tests {
             normalize: all_args.vol_normalize,
             skip_merges: all_args.vol_skip_merges,
             output: crate::cli::VolatilityOutputFormat::Table,
+            ci_output: None,
         };
 
         assert!(
@@ -649,6 +664,7 @@ mod tests {
             metrics: all_args.rca_metrics,
             language: all_args.rca_language.clone(),
             output: crate::cli::RustCodeAnalysisOutputFormat::Table,
+            ci_output: None,
         };
 
         assert_eq!(

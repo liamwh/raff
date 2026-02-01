@@ -10,6 +10,7 @@ fn main() -> Result<()> {
         normalize: false,
         skip_merges: false,
         output: VolatilityOutputFormat::Table,
+        ci_output: None,
     };
 
     let rule = VolatilityRule::new();

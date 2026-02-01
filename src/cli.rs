@@ -48,6 +48,19 @@ pub enum Commands {
     ContributorReport(ContributorReportArgs),
 }
 
+/// Shared output format for CI/CD platforms.
+///
+/// This enum provides formats specifically designed for consumption by
+/// CI/CD platforms like GitHub Actions (SARIF) and Azure DevOps (JUnit).
+/// Use `--ci-output` to select these formats.
+#[derive(ValueEnum, Clone, Debug, PartialEq)]
+pub enum CiOutputFormat {
+    /// SARIF v2.1.0 JSON format for GitHub Actions and other SARIF consumers
+    Sarif,
+    /// JUnit XML format for Azure DevOps and other JUnit consumers
+    JUnit,
+}
+
 /// Enum representing the supported output formats for the statement count report.
 #[derive(ValueEnum, Clone, Debug, Default)]
 pub enum StatementCountOutputFormat {
@@ -72,6 +85,11 @@ pub struct StatementCountArgs {
     /// Output format for the report.
     #[clap(long, value_enum, default_value_t = StatementCountOutputFormat::default())]
     pub output: StatementCountOutputFormat,
+
+    /// CI output format (overrides --output for CI platforms).
+    /// Use this for SARIF or JUnit output in CI/CD pipelines.
+    #[clap(long, value_enum)]
+    pub ci_output: Option<CiOutputFormat>,
 }
 
 /// Enum representing the supported output formats for the volatility report.
@@ -111,6 +129,11 @@ pub struct VolatilityArgs {
     /// Output format for the report.
     #[clap(long, value_enum, default_value_t = VolatilityOutputFormat::default())]
     pub output: VolatilityOutputFormat,
+
+    /// CI output format (overrides --output for CI platforms).
+    /// Use this for SARIF or JUnit output in CI/CD pipelines.
+    #[clap(long, value_enum)]
+    pub ci_output: Option<CiOutputFormat>,
 }
 
 /// Enum representing the supported output formats for the coupling report.
@@ -150,6 +173,11 @@ pub struct CouplingArgs {
     /// Granularity of the coupling report.
     #[clap(long, value_enum, default_value_t = CouplingGranularity::default())]
     pub granularity: CouplingGranularity,
+
+    /// CI output format (overrides --output for CI platforms).
+    /// Use this for SARIF or JUnit output in CI/CD pipelines.
+    #[clap(long, value_enum)]
+    pub ci_output: Option<CiOutputFormat>,
 }
 
 /// Output format for the rust-code-analysis subcommand.
@@ -190,6 +218,11 @@ pub struct RustCodeAnalysisArgs {
     /// Note: This wrapper primarily targets Rust analysis.
     #[clap(short = 'l', long, default_value = "rust")]
     pub language: String,
+
+    /// CI output format (overrides --output for CI platforms).
+    /// Use this for SARIF or JUnit output in CI/CD pipelines.
+    #[clap(long, value_enum)]
+    pub ci_output: Option<CiOutputFormat>,
 }
 
 /// Enum representing the supported output formats for the full report.
@@ -250,6 +283,11 @@ pub struct AllArgs {
     /// Language to analyze.
     #[clap(short = 'l', long = "rca_language", default_value = "rust")]
     pub rca_language: String,
+
+    /// CI output format (overrides --output for CI platforms).
+    /// Use this for SARIF or JUnit output in CI/CD pipelines.
+    #[clap(long, value_enum)]
+    pub ci_output: Option<CiOutputFormat>,
 }
 
 /// Enum representing the supported output formats for the contributor report.
@@ -280,4 +318,9 @@ pub struct ContributorReportArgs {
     /// Output format for the report.
     #[clap(long, value_enum, default_value_t = ContributorReportOutputFormat::default())]
     pub output: ContributorReportOutputFormat,
+
+    /// CI output format (overrides --output for CI platforms).
+    /// Use this for SARIF or JUnit output in CI/CD pipelines.
+    #[clap(long, value_enum)]
+    pub ci_output: Option<CiOutputFormat>,
 }

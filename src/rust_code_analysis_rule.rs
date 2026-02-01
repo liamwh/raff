@@ -949,6 +949,7 @@ fn main() {
             jobs: 1,
             extra_flags: vec![],
             output: RustCodeAnalysisOutputFormat::Table,
+            ci_output: None,
         };
 
         // Note: This test requires rust-code-analysis-cli to be installed
@@ -983,6 +984,7 @@ fn main() {
             jobs: 1,
             extra_flags: vec![],
             output: RustCodeAnalysisOutputFormat::Table,
+            ci_output: None,
         };
 
         // Call the Rule trait's analyze method
@@ -1008,6 +1010,7 @@ fn main() {
             jobs: 1,
             extra_flags: vec![],
             output: RustCodeAnalysisOutputFormat::Table,
+            ci_output: None,
         };
 
         // Verify Data type is RustCodeAnalysisData

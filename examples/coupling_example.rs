@@ -7,6 +7,7 @@ fn main() -> Result<()> {
         path: PathBuf::from("."),
         output: CouplingOutputFormat::Table,
         granularity: CouplingGranularity::Module,
+        ci_output: None,
     };
 
     let rule = CouplingRule::new();

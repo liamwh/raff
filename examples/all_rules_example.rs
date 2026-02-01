@@ -16,6 +16,7 @@ fn main() -> Result<()> {
         rca_jobs: num_cpus::get(),
         rca_metrics: true,
         rca_language: "rust".to_string(),
+        ci_output: None,
     };
 
     all_rules::run_all(&args)

@@ -1064,6 +1064,7 @@ verbose = true
             path: PathBuf::from("."),
             threshold: 10,
             output: crate::cli::StatementCountOutputFormat::Table,
+            ci_output: None,
         };
 
         let merged = merge_statement_count_args(&cli_args, &config);
@@ -1087,6 +1088,7 @@ verbose = true
             path: PathBuf::from("."),
             threshold: 10,
             output: crate::cli::StatementCountOutputFormat::Table,
+            ci_output: None,
         };
 
         let merged = merge_statement_count_args(&cli_args, &config);
@@ -1110,6 +1112,7 @@ verbose = true
             path: PathBuf::from("/cli/path"),
             threshold: 50,
             output: crate::cli::StatementCountOutputFormat::Html,
+            ci_output: None,
         };
 
         let merged = merge_statement_count_args(&cli_args, &config);
@@ -1141,6 +1144,7 @@ verbose = true
             normalize: false,
             skip_merges: false,
             output: crate::cli::VolatilityOutputFormat::Table,
+            ci_output: None,
         };
 
         let merged = merge_volatility_args(&cli_args, &config);
@@ -1168,6 +1172,7 @@ verbose = true
             normalize: false,
             skip_merges: false,
             output: crate::cli::VolatilityOutputFormat::Json,
+            ci_output: None,
         };
 
         let merged = merge_volatility_args(&cli_args, &config);
@@ -1195,6 +1200,7 @@ verbose = true
             path: PathBuf::from("."),
             output: crate::cli::CouplingOutputFormat::Table,
             granularity: crate::cli::CouplingGranularity::Both,
+            ci_output: None,
         };
 
         let merged = merge_coupling_args(&cli_args, &config);
@@ -1224,6 +1230,7 @@ verbose = true
             output: crate::cli::RustCodeAnalysisOutputFormat::Table,
             metrics: true,
             language: "rust".to_string(),
+            ci_output: None,
         };
 
         let merged = merge_rust_code_analysis_args(&cli_args, &config);
@@ -1247,6 +1254,7 @@ verbose = true
             since: None,
             decay: 0.01,
             output: crate::cli::ContributorReportOutputFormat::Table,
+            ci_output: None,
         };
 
         let merged = merge_contributor_report_args(&cli_args, &config);
@@ -1282,6 +1290,7 @@ verbose = true
             rca_jobs: num_cpus::get(),
             rca_metrics: true,
             rca_language: "rust".to_string(),
+            ci_output: None,
         };
 
         let merged = merge_all_args(&cli_args, &config);
