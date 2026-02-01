@@ -350,6 +350,11 @@ pub fn merge_statement_count_args(
         }
     }
 
+    // Merge output_file: CLI arg OR general config output_file
+    if merged.output_file.is_none() {
+        merged.output_file = config.general.output_file.clone();
+    }
+
     merged
 }
 
@@ -1069,6 +1074,7 @@ verbose = true
             threshold: 10,
             output: crate::cli::StatementCountOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         let merged = merge_statement_count_args(&cli_args, &config);
@@ -1093,6 +1099,7 @@ verbose = true
             threshold: 10,
             output: crate::cli::StatementCountOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         let merged = merge_statement_count_args(&cli_args, &config);
@@ -1117,6 +1124,7 @@ verbose = true
             threshold: 50,
             output: crate::cli::StatementCountOutputFormat::Html,
             ci_output: None,
+            output_file: None,
         };
 
         let merged = merge_statement_count_args(&cli_args, &config);

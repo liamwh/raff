@@ -118,6 +118,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         threshold: args.sc_threshold,
         output: crate::cli::StatementCountOutputFormat::Table, // format is irrelevant for analyze
         ci_output: None,
+        output_file: None,
     };
     let vol_args = crate::cli::VolatilityArgs {
         path: args.path.clone(),
@@ -261,6 +262,7 @@ mod tests {
             threshold,
             output: crate::cli::StatementCountOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         }
     }
 
@@ -487,6 +489,7 @@ mod tests {
             threshold: all_args.sc_threshold,
             output: crate::cli::StatementCountOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         assert_eq!(

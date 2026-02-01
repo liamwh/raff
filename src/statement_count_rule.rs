@@ -25,6 +25,7 @@
 //!     threshold: 10,
 //!     output: StatementCountOutputFormat::Table,
 //!     ci_output: None,
+//!     output_file: None,
 //! };
 //!
 //! if let Err(e) = rule.run(&args) {
@@ -51,12 +52,14 @@ use bincode;
 use maud::html;
 use maud::Markup;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{collections::HashMap, fs, io::Write, path::PathBuf};
 use syn::visit::Visit;
 use syn::File as SynFile;
+use tracing::instrument;
 
 use crate::cache::{CacheEntry, CacheKey, CacheManager};
-use crate::cli::{StatementCountArgs, StatementCountOutputFormat}; // Import the specific args struct
+use crate::ci_report::{Finding, Severity, ToFindings};
+use crate::cli::{CiOutputFormat, StatementCountArgs, StatementCountOutputFormat}; // Import the specific args struct
 use crate::counter::StmtCounter; // Assuming counter.rs is at crate::counter
 use crate::error::{RaffError, Result};
 use crate::file_utils::{collect_all_rs, relative_namespace, top_level_component}; // Assuming file_utils.rs is at crate::file_utils
@@ -74,6 +77,41 @@ pub struct StatementCountData {
     pub grand_total: usize,
     pub threshold: usize,
     pub analysis_path: PathBuf,
+}
+
+impl ToFindings for StatementCountData {
+    #[instrument(skip(self), fields(rule_id = "statement-count", threshold = self.threshold))]
+    fn to_findings(&self) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        for (component, (_file_count, stmt_count)) in &self.component_stats {
+            if self.grand_total == 0 {
+                continue;
+            }
+            let percentage = (*stmt_count * 100) / self.grand_total;
+
+            if percentage > self.threshold {
+                findings.push(Finding {
+                    rule_id: "statement-count".to_string(),
+                    rule_name: "Statement Count Rule".to_string(),
+                    severity: Severity::Error,
+                    message: format!(
+                        "Component '{}' has {} statements ({}%), exceeding threshold of {}%",
+                        component, stmt_count, percentage, self.threshold
+                    ),
+                    location: None, // We don't track individual files in StatementCountData
+                    help_uri: Some(
+                        "https://github.com/liamwh/raff/docs/statement-count".to_string(),
+                    ),
+                    fingerprint: Some(format!(
+                        "statement-count:{}:{}:{}",
+                        component, self.threshold, stmt_count
+                    )),
+                });
+            }
+        }
+        findings
+    }
 }
 
 impl Rule for StatementCountRule {
@@ -108,6 +146,49 @@ impl StatementCountRule {
 
     fn run_impl(&self, args: &StatementCountArgs) -> Result<()> {
         let data = self.analyze(args)?;
+
+        // Check for CI output first (takes precedence)
+        if let Some(ci_format) = &args.ci_output {
+            let findings = data.to_findings();
+
+            let output = match ci_format {
+                CiOutputFormat::Sarif => crate::ci_report::to_sarif(&findings)?,
+                CiOutputFormat::JUnit => crate::ci_report::to_junit(&findings, "statement-count")?,
+            };
+
+            // Write to file if specified, otherwise stdout
+            if let Some(ref output_file) = args.output_file {
+                let mut file = fs::File::create(output_file).map_err(|e| {
+                    RaffError::io_error(format!(
+                        "Failed to create output file {}: {}",
+                        output_file.display(),
+                        e
+                    ))
+                })?;
+                file.write_all(output.as_bytes()).map_err(|e| {
+                    RaffError::io_error(format!(
+                        "Failed to write to output file {}: {}",
+                        output_file.display(),
+                        e
+                    ))
+                })?;
+            } else {
+                println!("{output}");
+            }
+
+            // Apply exit code policy
+            let has_errors = findings.iter().any(|f| f.severity == Severity::Error);
+            if has_errors {
+                return Err(RaffError::analysis_error(
+                    "statement_count",
+                    format!(
+                        "At least one component exceeds {}% of total statements.",
+                        data.threshold
+                    ),
+                ));
+            }
+            return Ok(());
+        }
 
         match args.output {
             StatementCountOutputFormat::Table => {
@@ -421,6 +502,7 @@ pub fn func_b() {
             threshold: 10,
             output: StatementCountOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         }
     }
 
@@ -841,6 +923,7 @@ pub fn func_b() {
             threshold: 10,
             output: StatementCountOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         // Verify Data type is StatementCountData
@@ -850,5 +933,136 @@ pub fn func_b() {
 
         // Verify run and analyze work with these types
         let _ = rule;
+    }
+
+    // Tests for CI output functionality
+
+    #[test]
+    fn test_to_findings_with_no_exceeding_components() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.threshold = 100; // High threshold to ensure no findings
+
+        let data = rule.analyze(&args).expect("analyze should succeed");
+        let findings = data.to_findings();
+
+        assert!(
+            findings.is_empty(),
+            "to_findings should return empty when no components exceed threshold"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_with_exceeding_components() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.threshold = 1; // Very low threshold to trigger findings
+
+        let data = rule.analyze(&args).expect("analyze should succeed");
+        let findings = data.to_findings();
+
+        assert!(
+            !findings.is_empty(),
+            "to_findings should return findings when components exceed threshold"
+        );
+
+        // Verify the first finding has the expected properties
+        let finding = &findings[0];
+        assert_eq!(finding.rule_id, "statement-count");
+        assert_eq!(finding.rule_name, "Statement Count Rule");
+        assert_eq!(finding.severity, Severity::Error);
+        assert!(
+            finding.message.contains("exceeding threshold"),
+            "finding message should mention exceeding threshold"
+        );
+        assert!(
+            finding.fingerprint.is_some(),
+            "finding should have a fingerprint for deduplication"
+        );
+        assert!(
+            finding.location.is_none(),
+            "finding location should be None since we don't track individual files"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_fingerprint_includes_component_and_threshold() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.threshold = 1; // Very low threshold to trigger findings
+
+        let data = rule.analyze(&args).expect("analyze should succeed");
+        let findings = data.to_findings();
+
+        assert!(!findings.is_empty(), "should have at least one finding");
+
+        let fingerprint = findings[0]
+            .fingerprint
+            .as_ref()
+            .expect("should have fingerprint");
+        assert!(
+            fingerprint.contains("statement-count:"),
+            "fingerprint should contain rule ID"
+        );
+        assert!(
+            fingerprint.contains(":1:"),
+            "fingerprint should contain threshold (1)"
+        );
+    }
+
+    #[test]
+    fn test_run_with_ci_output_sarif_succeeds() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.threshold = 100; // High threshold to avoid errors
+        args.ci_output = Some(CiOutputFormat::Sarif);
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_ok(),
+            "run with SARIF CI output should succeed when no errors"
+        );
+    }
+
+    #[test]
+    fn test_run_with_ci_output_junit_succeeds() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.threshold = 100; // High threshold to avoid errors
+        args.ci_output = Some(CiOutputFormat::JUnit);
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_ok(),
+            "run with JUnit CI output should succeed when no errors"
+        );
+    }
+
+    #[test]
+    fn test_run_with_ci_output_fails_when_errors_found() {
+        let temp_dir = create_test_directory();
+        let rule = StatementCountRule::new();
+        let mut args = create_test_args(temp_dir.path().to_path_buf());
+        args.threshold = 1; // Very low threshold to trigger errors
+        args.ci_output = Some(CiOutputFormat::Sarif);
+
+        let result = rule.run(&args);
+
+        assert!(
+            result.is_err(),
+            "run with CI output should fail when errors are found"
+        );
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("exceeds"),
+            "error message should mention exceeding threshold"
+        );
     }
 }

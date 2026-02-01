@@ -8,6 +8,7 @@ fn main() -> Result<()> {
         threshold: 10,
         output: StatementCountOutputFormat::Table,
         ci_output: None,
+        output_file: None,
     };
 
     let rule = StatementCountRule::new();

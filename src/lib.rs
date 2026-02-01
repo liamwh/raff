@@ -44,6 +44,7 @@
 //!     threshold: 1000,
 //!     output: StatementCountOutputFormat::Table,
 //!     ci_output: None,
+//!     output_file: None,
 //! };
 //!
 //! // Run the analysis
