@@ -685,6 +685,11 @@ pub fn merge_all_args(cli_args: &crate::cli::AllArgs, config: &RaffConfig) -> cr
         merged.rca_language = config.rust_code_analysis.language.clone();
     }
 
+    // Merge output_file: Use general.output_file if CLI arg is not set
+    if merged.output_file.is_none() {
+        merged.output_file = config.general.output_file.clone();
+    }
+
     merged
 }
 
@@ -1328,6 +1333,7 @@ verbose = true
             rca_metrics: true,
             rca_language: "rust".to_string(),
             ci_output: None,
+            output_file: None,
         };
 
         let merged = merge_all_args(&cli_args, &config);

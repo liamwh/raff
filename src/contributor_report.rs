@@ -40,6 +40,7 @@
 //!     decay: 0.01,
 //!     output: ContributorReportOutputFormat::Table,
 //!     ci_output: None,
+//!     output_file: None,
 //! };
 //!
 //! if let Err(e) = rule.run(&args) {

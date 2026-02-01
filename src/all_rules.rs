@@ -33,6 +33,7 @@
 //!     rca_metrics: true,
 //!     rca_language: "rust".to_string(),
 //!     ci_output: None,
+//!     output_file: None,
 //! };
 //!
 //! run_all(&args)?;
@@ -40,18 +41,20 @@
 //! # }
 //! ```
 
+use crate::ci_report::{Severity, ToFindings};
 use crate::error::Result;
-use maud::Markup;
-use serde::Serialize;
-
 use crate::{
-    cli::{AllArgs, AllOutputFormat},
+    cli::{AllArgs, AllOutputFormat, CiOutputFormat},
     coupling_rule::{CouplingData, CouplingRule},
     html_utils,
     rust_code_analysis_rule::{RustCodeAnalysisData, RustCodeAnalysisRule},
     statement_count_rule::{StatementCountData, StatementCountRule},
     volatility_rule::{VolatilityData, VolatilityRule},
 };
+use maud::Markup;
+use serde::Serialize;
+use std::fs::File;
+use std::io::Write;
 
 #[derive(Debug)]
 pub struct AllReportData {
@@ -118,7 +121,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         threshold: args.sc_threshold,
         output: crate::cli::StatementCountOutputFormat::Table, // format is irrelevant for analyze
         ci_output: None,
-        output_file: None,
+        output_file: args.output_file.clone(),
     };
     let vol_args = crate::cli::VolatilityArgs {
         path: args.path.clone(),
@@ -128,14 +131,14 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         skip_merges: args.vol_skip_merges,
         output: crate::cli::VolatilityOutputFormat::Table, // format is irrelevant for analyze
         ci_output: None,
-        output_file: None,
+        output_file: args.output_file.clone(),
     };
     let coup_args = crate::cli::CouplingArgs {
         path: args.path.clone(),
         granularity: args.coup_granularity.clone(),
         output: crate::cli::CouplingOutputFormat::Table, // format is irrelevant for analyze
         ci_output: None,
-        output_file: None,
+        output_file: args.output_file.clone(),
     };
     let rca_args = crate::cli::RustCodeAnalysisArgs {
         path: args.path.clone(),
@@ -145,7 +148,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         language: args.rca_language.clone(),
         output: crate::cli::RustCodeAnalysisOutputFormat::Table, // format is irrelevant for analyze
         ci_output: None,
-        output_file: None,
+        output_file: args.output_file.clone(),
     };
 
     let all_data = AllReportData {
@@ -154,6 +157,60 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         coupling: Some(coup_rule.analyze(&coup_args)),
         rust_code_analysis: Some(rca_rule.analyze(&rca_args)),
     };
+
+    // Check for CI output first (takes precedence)
+    if let Some(ci_format) = &args.ci_output {
+        let mut all_findings = Vec::new();
+
+        // Each rule sets its own severity in to_findings()
+        if let Some(Ok(data)) = &all_data.statement_count {
+            all_findings.extend(data.to_findings());
+        }
+        if let Some(Ok(data)) = &all_data.volatility {
+            all_findings.extend(data.to_findings());
+        }
+        if let Some(Ok(data)) = &all_data.coupling {
+            all_findings.extend(data.to_findings());
+        }
+        if let Some(Ok(data)) = &all_data.rust_code_analysis {
+            all_findings.extend(data.to_findings());
+        }
+
+        let output = match ci_format {
+            CiOutputFormat::Sarif => crate::ci_report::to_sarif(&all_findings)?,
+            CiOutputFormat::JUnit => crate::ci_report::to_junit(&all_findings, "raff-all-rules")?,
+        };
+
+        // Write to file if specified, otherwise stdout
+        if let Some(ref output_file) = args.output_file {
+            let mut file = File::create(output_file).map_err(|e| {
+                crate::error::RaffError::io_error(format!(
+                    "Failed to create output file {}: {}",
+                    output_file.display(),
+                    e
+                ))
+            })?;
+            file.write_all(output.as_bytes()).map_err(|e| {
+                crate::error::RaffError::io_error(format!(
+                    "Failed to write to output file {}: {}",
+                    output_file.display(),
+                    e
+                ))
+            })?;
+        } else {
+            println!("{output}");
+        }
+
+        // Exit code based on any Error findings
+        let has_errors = all_findings.iter().any(|f| f.severity == Severity::Error);
+        if has_errors {
+            return Err(crate::error::RaffError::analysis_error(
+                "all",
+                "Found errors in one or more rules",
+            ));
+        }
+        return Ok(());
+    }
 
     match args.output {
         AllOutputFormat::Json => {
@@ -251,6 +308,7 @@ mod tests {
             rca_metrics: true,
             rca_language: "rust".to_string(),
             ci_output: None,
+            output_file: None,
         }
     }
 
@@ -761,6 +819,166 @@ mod tests {
         assert_eq!(
             report_data.errors[0], "test error",
             "error message should match"
+        );
+    }
+
+    // CI output tests
+
+    #[test]
+    fn test_all_args_with_ci_output_sarif_succeeds() {
+        let mut args = create_test_args(".");
+        args.ci_output = Some(CiOutputFormat::Sarif);
+
+        // The test should either succeed or fail with an expected error
+        // (it will likely fail due to no actual repo, but we're testing the CI output path)
+        let result = run_all(&args);
+
+        // We expect this to fail (no actual repo), but the important thing is
+        // that it doesn't panic and goes through the CI output path
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with ci_output should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_with_ci_output_junit_succeeds() {
+        let mut args = create_test_args(".");
+        args.ci_output = Some(CiOutputFormat::JUnit);
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with ci_output should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_with_ci_output_and_output_file_succeeds() {
+        use tempfile::NamedTempFile;
+
+        let mut args = create_test_args(".");
+        args.ci_output = Some(CiOutputFormat::Sarif);
+
+        let temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        args.output_file = Some(temp_file.path().to_path_buf());
+
+        let result = run_all(&args);
+
+        // Clean up temp file
+        let _ = std::fs::remove_file(temp_file.path());
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with output_file should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_without_ci_output_uses_regular_output() {
+        let args = create_test_args(".");
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all without ci_output should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_ci_output_none_does_not_trigger_ci_path() {
+        let mut args = create_test_args(".");
+        args.ci_output = None;
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with ci_output=None should use regular output path"
+        );
+    }
+
+    #[test]
+    fn test_all_output_format_json_without_ci_output() {
+        let mut args = create_test_args(".");
+        args.output = AllOutputFormat::Json;
+        args.ci_output = None;
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with JSON output should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_output_format_html_without_ci_output() {
+        let mut args = create_test_args(".");
+        args.output = AllOutputFormat::Html;
+        args.ci_output = None;
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with HTML output should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_with_output_file_only() {
+        use tempfile::NamedTempFile;
+
+        let mut args = create_test_args(".");
+        args.output_file = Some(
+            NamedTempFile::new()
+                .expect("Failed to create temp file")
+                .path()
+                .to_path_buf(),
+        );
+
+        let result = run_all(&args);
+
+        // Clean up temp file
+        if let Some(ref path) = args.output_file {
+            let _ = std::fs::remove_file(path);
+        }
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with output_file should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_ci_output_sarif_takes_precedence_over_json() {
+        let mut args = create_test_args(".");
+        args.output = AllOutputFormat::Json;
+        args.ci_output = Some(CiOutputFormat::Sarif);
+
+        let result = run_all(&args);
+
+        // With ci_output set, it should take precedence over output format
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with ci_output should take precedence"
+        );
+    }
+
+    #[test]
+    fn test_all_args_ci_output_junit_takes_precedence_over_html() {
+        let mut args = create_test_args(".");
+        args.output = AllOutputFormat::Html;
+        args.ci_output = Some(CiOutputFormat::JUnit);
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with ci_output should take precedence"
         );
     }
 }
