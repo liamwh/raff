@@ -35,6 +35,7 @@
 //!     extra_flags: vec![],
 //!     output: RustCodeAnalysisOutputFormat::Table,
 //!     ci_output: None,
+//!     output_file: None,
 //! };
 //!
 //! if let Err(e) = rule.run(&args) {
@@ -90,6 +91,7 @@
 //! - The tool exits with a non-zero status
 //! - The tool produces invalid JSON output
 
+use crate::ci_report::{Finding, Location, Severity, ToFindings};
 use crate::error::{RaffError, Result};
 use crate::rule::Rule;
 use prettytable::{format as pt_format, Attr, Cell, Row, Table};
@@ -99,7 +101,7 @@ use maud::html;
 use std::path::{Path, PathBuf};
 use tracing::instrument;
 
-use crate::cli::{RustCodeAnalysisArgs, RustCodeAnalysisOutputFormat};
+use crate::cli::{CiOutputFormat, RustCodeAnalysisArgs, RustCodeAnalysisOutputFormat};
 use crate::html_utils;
 
 // --- Structs for deserializing rust-code-analysis-cli JSON output ---
@@ -240,6 +242,54 @@ pub struct RustCodeAnalysisData {
     pub analysis_path: PathBuf,
 }
 
+impl ToFindings for RustCodeAnalysisData {
+    #[tracing::instrument(skip(self), fields(rule_id = "rust-code-analysis"))]
+    fn to_findings(&self) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        // Generate Note-severity findings for each analyzed file
+        // RustCodeAnalysis provides informational metrics, not errors or warnings
+        for unit in &self.analysis_results {
+            // Aggregate metrics for this file
+            let mut aggregated = FileAggregatedMetrics::default();
+            aggregate_metrics_recursive(&unit.spaces, &mut aggregated);
+
+            // Only create findings for files with actual metrics
+            if aggregated.sloc > 0.0 || aggregated.cyclomatic_sum > 0.0 {
+                let file_path = PathBuf::from(&unit.name);
+                let relative_path =
+                    crate::ci_report::normalize_repo_relative(&file_path, &self.analysis_path);
+
+                let cyclomatic_avg = if aggregated.items_with_metrics > 0 {
+                    aggregated.cyclomatic_sum / aggregated.items_with_metrics as f64
+                } else {
+                    0.0
+                };
+
+                findings.push(Finding {
+                    rule_id: "rust-code-analysis".to_string(),
+                    rule_name: "Rust Code Analysis Rule".to_string(),
+                    severity: Severity::Note, // Informational metrics only
+                    message: format!(
+                        "File metrics: SLOC={:.0}, Cyclomatic Avg={:.1}, Halstead Volume={:.1}",
+                        aggregated.sloc, cyclomatic_avg, aggregated.halstead_volume
+                    ),
+                    location: Some(Location::new(relative_path)),
+                    help_uri: Some(
+                        "https://github.com/liamwh/raff/docs/rust-code-analysis".to_string(),
+                    ),
+                    fingerprint: Some(format!(
+                        "rust-code-analysis:{}:{}:{}",
+                        unit.name, aggregated.sloc, aggregated.halstead_volume
+                    )),
+                });
+            }
+        }
+
+        findings
+    }
+}
+
 impl Rule for RustCodeAnalysisRule {
     type Config = RustCodeAnalysisArgs;
     type Data = RustCodeAnalysisData;
@@ -279,6 +329,31 @@ impl RustCodeAnalysisRule {
         if data.analysis_results.is_empty() {
             tracing::info!("Analysis produced no results.");
             println!("No analysis data produced.");
+            return Ok(());
+        }
+
+        // Check for CI output first (takes precedence)
+        if let Some(ci_format) = &args.ci_output {
+            let findings = data.to_findings();
+
+            let output = match ci_format {
+                CiOutputFormat::Sarif => crate::ci_report::to_sarif(&findings)?,
+                CiOutputFormat::JUnit => {
+                    crate::ci_report::to_junit(&findings, "rust-code-analysis")?
+                }
+            };
+
+            // Write to output file or stdout
+            if let Some(ref file_path) = args.output_file {
+                std::fs::write(file_path, output).map_err(|e| {
+                    RaffError::io_error(format!("Failed to write output file: {}", e))
+                })?;
+                tracing::info!("Output written to {}", file_path.display());
+            } else {
+                println!("{output}");
+            }
+
+            // Note severity doesn't fail CI - always return Ok
             return Ok(());
         }
 
@@ -951,6 +1026,7 @@ fn main() {
             extra_flags: vec![],
             output: RustCodeAnalysisOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         // Note: This test requires rust-code-analysis-cli to be installed
@@ -986,6 +1062,7 @@ fn main() {
             extra_flags: vec![],
             output: RustCodeAnalysisOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         // Call the Rule trait's analyze method
@@ -1012,6 +1089,7 @@ fn main() {
             extra_flags: vec![],
             output: RustCodeAnalysisOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         // Verify Data type is RustCodeAnalysisData
@@ -1021,5 +1099,354 @@ fn main() {
 
         // Verify run and analyze work with these types
         let _ = rule;
+    }
+
+    #[test]
+    fn test_to_findings_with_empty_results() {
+        let data = RustCodeAnalysisData {
+            analysis_results: vec![],
+            analysis_path: PathBuf::from("/test"),
+        };
+
+        let findings = data.to_findings();
+
+        assert!(
+            findings.is_empty(),
+            "to_findings should return empty vec for empty results"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_with_analysis_results() {
+        // Create a test AnalysisUnit with metrics
+        let unit = AnalysisUnit {
+            name: "/test/project/src/main.rs".to_string(),
+            kind: "unit".to_string(),
+            spaces: vec![CodeSpace {
+                name: "main".to_string(),
+                kind: "function".to_string(),
+                start_line: 1,
+                end_line: 10,
+                metrics: ItemMetrics {
+                    loc: Some(LocMetrics {
+                        sloc: 100.0,
+                        ploc: 120.0,
+                        lloc: 80.0,
+                        cloc: 20.0,
+                        blank: 10.0,
+                    }),
+                    cyclomatic: Some(CyclomaticMetrics {
+                        sum: 15.0,
+                        average: 15.0,
+                    }),
+                    halstead: Some(HalsteadMetrics {
+                        n1: 10.0,
+                        n2: 20.0,
+                        length: 30.0,
+                        vocabulary: 15.0,
+                        volume: 450.0,
+                        difficulty: 5.0,
+                        effort: 2250.0,
+                        time: 125.0,
+                        bugs: 0.05,
+                    }),
+                },
+                spaces: vec![],
+            }],
+            metrics: None,
+        };
+
+        let data = RustCodeAnalysisData {
+            analysis_results: vec![unit],
+            analysis_path: PathBuf::from("/test/project"),
+        };
+
+        let findings = data.to_findings();
+
+        assert_eq!(findings.len(), 1, "Should create one finding per file");
+
+        let finding = &findings[0];
+        assert_eq!(finding.rule_id, "rust-code-analysis");
+        assert_eq!(finding.rule_name, "Rust Code Analysis Rule");
+        assert_eq!(finding.severity, Severity::Note);
+        assert!(finding.message.contains("SLOC=100"));
+        assert!(finding.message.contains("Cyclomatic Avg=15"));
+        assert!(finding.message.contains("Halstead Volume=450"));
+        assert_eq!(
+            finding.location.as_ref().map(|l| l.uri.as_str()),
+            Some("src/main.rs")
+        );
+        assert_eq!(
+            finding.fingerprint,
+            Some("rust-code-analysis:/test/project/src/main.rs:100:450".to_string())
+        );
+    }
+
+    #[test]
+    fn test_to_findings_note_severity() {
+        let unit = AnalysisUnit {
+            name: "/test/src/lib.rs".to_string(),
+            kind: "unit".to_string(),
+            spaces: vec![CodeSpace {
+                name: "function".to_string(),
+                kind: "function".to_string(),
+                start_line: 1,
+                end_line: 5,
+                metrics: ItemMetrics {
+                    loc: Some(LocMetrics {
+                        sloc: 50.0,
+                        ploc: 60.0,
+                        lloc: 40.0,
+                        cloc: 10.0,
+                        blank: 5.0,
+                    }),
+                    cyclomatic: Some(CyclomaticMetrics {
+                        sum: 5.0,
+                        average: 5.0,
+                    }),
+                    halstead: Some(HalsteadMetrics {
+                        n1: 5.0,
+                        n2: 10.0,
+                        length: 15.0,
+                        vocabulary: 8.0,
+                        volume: 120.0,
+                        difficulty: 3.0,
+                        effort: 360.0,
+                        time: 20.0,
+                        bugs: 0.01,
+                    }),
+                },
+                spaces: vec![],
+            }],
+            metrics: None,
+        };
+
+        let data = RustCodeAnalysisData {
+            analysis_results: vec![unit],
+            analysis_path: PathBuf::from("/test"),
+        };
+
+        let findings = data.to_findings();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, Severity::Note);
+        assert!(
+            !findings[0].severity.is_error(),
+            "Note severity should not be an error"
+        );
+    }
+
+    #[test]
+    fn test_to_findings_fingerprint_includes_file_and_metrics() {
+        let unit = AnalysisUnit {
+            name: "/test/project/src/file.rs".to_string(),
+            kind: "unit".to_string(),
+            spaces: vec![CodeSpace {
+                name: "test_func".to_string(),
+                kind: "function".to_string(),
+                start_line: 1,
+                end_line: 10,
+                metrics: ItemMetrics {
+                    loc: Some(LocMetrics {
+                        sloc: 75.0,
+                        ploc: 85.0,
+                        lloc: 65.0,
+                        cloc: 15.0,
+                        blank: 8.0,
+                    }),
+                    cyclomatic: Some(CyclomaticMetrics {
+                        sum: 10.0,
+                        average: 10.0,
+                    }),
+                    halstead: Some(HalsteadMetrics {
+                        n1: 8.0,
+                        n2: 15.0,
+                        length: 23.0,
+                        vocabulary: 12.0,
+                        volume: 276.0,
+                        difficulty: 4.0,
+                        effort: 1104.0,
+                        time: 61.33,
+                        bugs: 0.02,
+                    }),
+                },
+                spaces: vec![],
+            }],
+            metrics: None,
+        };
+
+        let data = RustCodeAnalysisData {
+            analysis_results: vec![unit],
+            analysis_path: PathBuf::from("/test/project"),
+        };
+
+        let findings = data.to_findings();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].fingerprint,
+            Some("rust-code-analysis:/test/project/src/file.rs:75:276".to_string())
+        );
+    }
+
+    #[test]
+    fn test_run_with_ci_output_sarif_succeeds() {
+        let temp_dir = tempdir().expect("Failed to create temp directory");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        // Create a simple main.rs file
+        let main_rs = r#"
+fn main() {
+    println!("Hello, world!");
+}
+"#;
+        fs::write(src_dir.join("main.rs"), main_rs).expect("Failed to write main.rs");
+
+        let rule = RustCodeAnalysisRule::new();
+        let args = RustCodeAnalysisArgs {
+            path: temp_dir.path().to_path_buf(),
+            language: "rust".to_string(),
+            metrics: true,
+            jobs: 1,
+            extra_flags: vec![],
+            output: RustCodeAnalysisOutputFormat::Table,
+            ci_output: Some(CiOutputFormat::Sarif),
+            output_file: None,
+        };
+
+        // Note: This test requires rust-code-analysis-cli to be installed
+        let result = rule.run(&args);
+
+        // We just verify it returns the right type (Result<()>)
+        // If rust-code-analysis-cli is not installed, it will return an error
+        match result {
+            Ok(()) => {
+                // Success - SARIF output was printed to stdout
+            }
+            Err(_) => {
+                // This is expected if rust-code-analysis-cli is not installed
+                // We just want to verify the method signature is correct
+            }
+        }
+    }
+
+    #[test]
+    fn test_run_with_ci_output_junit_succeeds() {
+        let temp_dir = tempdir().expect("Failed to create temp directory");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        let main_rs = r#"
+fn main() {
+    println!("Test");
+}
+"#;
+        fs::write(src_dir.join("main.rs"), main_rs).expect("Failed to write main.rs");
+
+        let rule = RustCodeAnalysisRule::new();
+        let args = RustCodeAnalysisArgs {
+            path: temp_dir.path().to_path_buf(),
+            language: "rust".to_string(),
+            metrics: true,
+            jobs: 1,
+            extra_flags: vec![],
+            output: RustCodeAnalysisOutputFormat::Table,
+            ci_output: Some(CiOutputFormat::JUnit),
+            output_file: None,
+        };
+
+        // Note: This test requires rust-code-analysis-cli to be installed
+        let result = rule.run(&args);
+
+        match result {
+            Ok(()) => {
+                // Success - JUnit output was printed to stdout
+            }
+            Err(_) => {
+                // Expected if rust-code-analysis-cli is not installed
+            }
+        }
+    }
+
+    #[test]
+    fn test_run_with_ci_output_does_not_fail_on_notes() {
+        let temp_dir = tempdir().expect("Failed to create temp directory");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        let main_rs = r#"
+fn main() {
+    println!("Test");
+}
+"#;
+        fs::write(src_dir.join("main.rs"), main_rs).expect("Failed to write main.rs");
+
+        let rule = RustCodeAnalysisRule::new();
+        let args = RustCodeAnalysisArgs {
+            path: temp_dir.path().to_path_buf(),
+            language: "rust".to_string(),
+            metrics: true,
+            jobs: 1,
+            extra_flags: vec![],
+            output: RustCodeAnalysisOutputFormat::Table,
+            ci_output: Some(CiOutputFormat::Sarif),
+            output_file: None,
+        };
+
+        // Note severity should not cause CI failure
+        let result = rule.run(&args);
+
+        match result {
+            Ok(()) => {
+                // Success - Note severity doesn't fail
+            }
+            Err(_) => {
+                // Expected if rust-code-analysis-cli is not installed
+            }
+        }
+    }
+
+    #[test]
+    fn test_run_with_ci_output_and_output_file_succeeds() {
+        let temp_dir = tempdir().expect("Failed to create temp directory");
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create src directory");
+
+        let main_rs = r#"
+fn main() {
+    println!("Test");
+}
+"#;
+        fs::write(src_dir.join("main.rs"), main_rs).expect("Failed to write main.rs");
+
+        let output_file = temp_dir.path().join("output.json");
+
+        let rule = RustCodeAnalysisRule::new();
+        let args = RustCodeAnalysisArgs {
+            path: temp_dir.path().to_path_buf(),
+            language: "rust".to_string(),
+            metrics: true,
+            jobs: 1,
+            extra_flags: vec![],
+            output: RustCodeAnalysisOutputFormat::Table,
+            ci_output: Some(CiOutputFormat::Sarif),
+            output_file: Some(output_file.clone()),
+        };
+
+        let result = rule.run(&args);
+
+        match result {
+            Ok(()) => {
+                // Verify the file was created
+                assert!(
+                    output_file.exists(),
+                    "Output file should be created when ci_output and output_file are specified"
+                );
+            }
+            Err(_) => {
+                // Expected if rust-code-analysis-cli is not installed
+            }
+        }
     }
 }

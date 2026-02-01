@@ -11,6 +11,7 @@ fn main() -> Result<()> {
         metrics: true,
         language: "rust".to_string(),
         ci_output: None,
+        output_file: None,
     };
 
     let rule = RustCodeAnalysisRule::new();

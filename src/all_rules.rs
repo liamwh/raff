@@ -145,6 +145,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         language: args.rca_language.clone(),
         output: crate::cli::RustCodeAnalysisOutputFormat::Table, // format is irrelevant for analyze
         ci_output: None,
+        output_file: None,
     };
 
     let all_data = AllReportData {
@@ -307,6 +308,7 @@ mod tests {
             language: "rust".to_string(),
             output: crate::cli::RustCodeAnalysisOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         }
     }
 
@@ -592,6 +594,7 @@ mod tests {
             language: all_args.rca_language.clone(),
             output: crate::cli::RustCodeAnalysisOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         assert_eq!(
@@ -677,6 +680,7 @@ mod tests {
             language: all_args.rca_language.clone(),
             output: crate::cli::RustCodeAnalysisOutputFormat::Table,
             ci_output: None,
+            output_file: None,
         };
 
         assert_eq!(
