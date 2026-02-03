@@ -6,7 +6,8 @@
 
 use raff_core::config::{ContributorReportConfig, CouplingConfig, GeneralConfig};
 use raff_core::config::{
-    RaffConfig, RustCodeAnalysisConfig, StatementCountConfig, VolatilityConfig,
+    PreCommitProfile, ProfileConfig, RaffConfig, RustCodeAnalysisConfig, StatementCountConfig,
+    VolatilityConfig,
 };
 use raff_core::config_hierarchy::merge_configs;
 use raff_core::config_hierarchy::Mergeable;
@@ -31,6 +32,7 @@ proptest::proptest! {
         prop_assert_eq!(merged.coupling, config.coupling);
         prop_assert_eq!(merged.rust_code_analysis, config.rust_code_analysis);
         prop_assert_eq!(merged.contributor_report, config.contributor_report);
+        prop_assert_eq!(merged.profile, config.profile);
     }
 
     /// Property: Merge associativity.
@@ -62,6 +64,7 @@ proptest::proptest! {
         prop_assert_eq!(left.coupling, right.coupling);
         prop_assert_eq!(left.rust_code_analysis, right.rust_code_analysis);
         prop_assert_eq!(left.contributor_report, right.contributor_report);
+        prop_assert_eq!(left.profile, right.profile);
     }
 
     /// Property: Default is a neutral element (when merged on the left).
@@ -211,6 +214,30 @@ fn any_general_config() -> BoxedStrategy<GeneralConfig> {
         .boxed()
 }
 
+/// Strategy for generating arbitrary pre-commit profile configs.
+fn any_pre_commit_profile() -> BoxedStrategy<PreCommitProfile> {
+    (
+        prop::option::of(any::<bool>()),
+        prop::option::of(any::<bool>()),
+        prop::option::of(any::<bool>()),
+        prop::option::of(any::<usize>()),
+    )
+        .prop_map(|(fast, staged, quiet, sc_threshold)| PreCommitProfile {
+            fast,
+            staged,
+            quiet,
+            sc_threshold,
+        })
+        .boxed()
+}
+
+/// Strategy for generating arbitrary profile configs.
+fn any_profile_config() -> BoxedStrategy<ProfileConfig> {
+    prop::option::of(any_pre_commit_profile())
+        .prop_map(|pre_commit| ProfileConfig { pre_commit })
+        .boxed()
+}
+
 /// Strategy for generating arbitrary full raff configs.
 fn any_raff_config() -> BoxedStrategy<RaffConfig> {
     (
@@ -220,6 +247,7 @@ fn any_raff_config() -> BoxedStrategy<RaffConfig> {
         any_coupling_config(),
         any_rca_config(),
         any_contributor_report_config(),
+        any_profile_config(),
     )
         .prop_map(
             |(
@@ -229,6 +257,7 @@ fn any_raff_config() -> BoxedStrategy<RaffConfig> {
                 coupling,
                 rust_code_analysis,
                 contributor_report,
+                profile,
             )| {
                 RaffConfig {
                     general,
@@ -237,6 +266,7 @@ fn any_raff_config() -> BoxedStrategy<RaffConfig> {
                     coupling,
                     rust_code_analysis,
                     contributor_report,
+                    profile,
                 }
             },
         )

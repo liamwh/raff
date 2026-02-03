@@ -306,6 +306,7 @@ pub fn merge_configs(base: &RaffConfig, override_: &RaffConfig) -> RaffConfig {
         coupling: base.coupling.merge(&override_.coupling),
         rust_code_analysis: base.rust_code_analysis.merge(&override_.rust_code_analysis),
         contributor_report: base.contributor_report.merge(&override_.contributor_report),
+        profile: base.profile.merge(&override_.profile),
     }
 }
 
@@ -410,6 +411,35 @@ impl Mergeable for crate::config::ContributorReportConfig {
             decay: other.decay,
             output: other.output.clone().or_else(|| self.output.clone()),
         }
+    }
+}
+
+impl Mergeable for crate::config::PreCommitProfile {
+    fn merge(&self, other: &Self) -> Self {
+        Self {
+            fast: other.fast.or(self.fast),
+            staged: other.staged.or(self.staged),
+            quiet: other.quiet.or(self.quiet),
+            sc_threshold: other.sc_threshold.or(self.sc_threshold),
+        }
+    }
+}
+
+impl Mergeable for crate::config::ProfileConfig {
+    fn merge(&self, other: &Self) -> Self {
+        // If other has pre_commit, merge with self's pre_commit (if any)
+        // Otherwise, keep self's pre_commit
+        let pre_commit = match (&other.pre_commit, &self.pre_commit) {
+            (Some(other_pc), Some(self_pc)) => {
+                // Both have values - merge them
+                Some(self_pc.merge(other_pc))
+            }
+            (Some(other_pc), None) => Some(other_pc.clone()),
+            (None, Some(self_pc)) => Some(self_pc.clone()),
+            (None, None) => None,
+        };
+
+        Self { pre_commit }
     }
 }
 

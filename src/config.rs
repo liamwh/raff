@@ -45,6 +45,10 @@ pub struct RaffConfig {
     /// Contributor report configuration.
     #[serde(default)]
     pub contributor_report: ContributorReportConfig,
+
+    /// Profile configurations for different usage scenarios.
+    #[serde(default)]
+    pub profile: ProfileConfig,
 }
 
 /// General configuration settings.
@@ -214,6 +218,44 @@ pub struct ContributorReportConfig {
 
     /// Output format for the report.
     pub output: Option<String>,
+}
+
+/// Profile configuration for different usage scenarios.
+///
+/// Profiles allow pre-configured sets of options for common use cases,
+/// such as pre-commit hooks which need fast, minimal analysis.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Default)]
+pub struct ProfileConfig {
+    /// Pre-commit hook profile configuration.
+    #[serde(default)]
+    pub pre_commit: Option<PreCommitProfile>,
+}
+
+/// Pre-commit hook profile configuration.
+///
+/// This profile is optimized for use in pre-commit hooks, where
+/// speed and minimal output are important.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Default)]
+pub struct PreCommitProfile {
+    /// Run only fast rules (statement-count, coupling).
+    #[serde(default)]
+    pub fast: Option<bool>,
+
+    /// Analyze only git-staged files.
+    #[serde(default)]
+    pub staged: Option<bool>,
+
+    /// Minimal output (summary line only).
+    #[serde(default)]
+    pub quiet: Option<bool>,
+
+    /// Statement count threshold (more lenient for pre-commit).
+    #[serde(default)]
+    pub sc_threshold: Option<usize>,
 }
 
 impl Default for ContributorReportConfig {
@@ -1401,5 +1443,157 @@ verbose = true
             Some(crate::cli::CouplingGranularity::Module)
         ));
         assert!(parse_coupling_granularity("invalid").is_none());
+    }
+
+    // Profile configuration tests
+
+    #[test]
+    fn test_pre_commit_profile_default() {
+        let profile = PreCommitProfile::default();
+
+        assert!(profile.fast.is_none(), "fast should be None by default");
+        assert!(profile.staged.is_none(), "staged should be None by default");
+        assert!(profile.quiet.is_none(), "quiet should be None by default");
+        assert!(
+            profile.sc_threshold.is_none(),
+            "sc_threshold should be None by default"
+        );
+    }
+
+    #[test]
+    fn test_profile_config_default() {
+        let config = ProfileConfig::default();
+
+        assert!(
+            config.pre_commit.is_none(),
+            "pre_commit should be None by default"
+        );
+    }
+
+    #[test]
+    fn test_raff_config_default_includes_profile() {
+        let config = RaffConfig::default();
+
+        assert!(
+            config.profile.pre_commit.is_none(),
+            "profile.pre_commit should be None by default"
+        );
+    }
+
+    #[test]
+    fn test_load_config_with_pre_commit_profile() {
+        let content = r#"
+[profile.pre_commit]
+fast = true
+staged = true
+quiet = true
+sc_threshold = 15
+"#;
+        let temp_file = create_temp_config_file(content);
+
+        let result = load_config_from_path(temp_file.path());
+
+        assert!(result.is_ok(), "load_config_from_path should succeed");
+
+        let config = result.unwrap().expect("config should be present");
+        assert!(
+            config.profile.pre_commit.is_some(),
+            "pre_commit profile should be present"
+        );
+
+        let pc = config.profile.pre_commit.as_ref().unwrap();
+        assert_eq!(pc.fast, Some(true), "fast should be true");
+        assert_eq!(pc.staged, Some(true), "staged should be true");
+        assert_eq!(pc.quiet, Some(true), "quiet should be true");
+        assert_eq!(pc.sc_threshold, Some(15), "sc_threshold should be 15");
+    }
+
+    #[test]
+    fn test_load_config_with_partial_pre_commit_profile() {
+        let content = r#"
+[profile.pre_commit]
+fast = true
+sc_threshold = 20
+"#;
+        let temp_file = create_temp_config_file(content);
+
+        let result = load_config_from_path(temp_file.path());
+
+        assert!(result.is_ok(), "load_config_from_path should succeed");
+
+        let config = result.unwrap().expect("config should be present");
+        let pc = config.profile.pre_commit.as_ref().unwrap();
+
+        assert_eq!(pc.fast, Some(true));
+        assert!(pc.staged.is_none(), "staged should be None when not set");
+        assert!(pc.quiet.is_none(), "quiet should be None when not set");
+        assert_eq!(pc.sc_threshold, Some(20));
+    }
+
+    #[test]
+    fn test_config_with_profile_and_other_sections() {
+        let content = r#"
+[general]
+verbose = true
+
+[statement_count]
+threshold = 25
+
+[profile.pre_commit]
+fast = true
+staged = true
+quiet = true
+sc_threshold = 15
+"#;
+        let temp_file = create_temp_config_file(content);
+
+        let result = load_config_from_path(temp_file.path());
+
+        assert!(result.is_ok());
+
+        let config = result.unwrap().expect("config should be present");
+        assert!(config.general.verbose);
+        assert_eq!(config.statement_count.threshold, 25);
+
+        let pc = config.profile.pre_commit.as_ref().unwrap();
+        assert_eq!(pc.fast, Some(true));
+        assert_eq!(pc.staged, Some(true));
+        assert_eq!(pc.quiet, Some(true));
+        assert_eq!(pc.sc_threshold, Some(15));
+    }
+
+    #[test]
+    fn test_profile_config_serialization() {
+        let profile = PreCommitProfile {
+            fast: Some(true),
+            staged: Some(false),
+            quiet: Some(true),
+            sc_threshold: Some(15),
+        };
+
+        let toml_str = toml::to_string(&profile).expect("serialization should succeed");
+
+        assert!(toml_str.contains("fast = true"));
+        assert!(toml_str.contains("staged = false"));
+        assert!(toml_str.contains("quiet = true"));
+        assert!(toml_str.contains("sc_threshold = 15"));
+    }
+
+    #[test]
+    fn test_profile_config_deserialization() {
+        let toml_str = r#"
+fast = true
+staged = false
+quiet = true
+sc_threshold = 15
+"#;
+
+        let profile: PreCommitProfile =
+            toml::from_str(toml_str).expect("deserialization should succeed");
+
+        assert_eq!(profile.fast, Some(true));
+        assert_eq!(profile.staged, Some(false));
+        assert_eq!(profile.quiet, Some(true));
+        assert_eq!(profile.sc_threshold, Some(15));
     }
 }
