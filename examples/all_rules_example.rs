@@ -7,6 +7,7 @@ fn main() -> Result<()> {
         path: PathBuf::from("."),
         output: AllOutputFormat::Html,
         fast: false,
+        quiet: false,
         sc_threshold: 10,
         vol_alpha: 0.01,
         vol_since: None,

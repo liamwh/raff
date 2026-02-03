@@ -278,6 +278,11 @@ pub struct AllArgs {
     #[clap(long)]
     pub fast: bool,
 
+    /// Minimal output (summary line only).
+    /// Suppresses the full table output and prints only a single-line summary.
+    #[clap(long)]
+    pub quiet: bool,
+
     /// Percentage threshold for component size (0-100).
     #[clap(long, default_value_t = 10)]
     pub sc_threshold: usize,

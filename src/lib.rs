@@ -124,6 +124,9 @@ pub use crate::error::{RaffError as Error, Result};
 // Git utils exports
 pub use crate::git_utils::{filter_rust_files, get_staged_files};
 
+// CLI report exports
+pub use crate::cli_report::render_summary_line;
+
 // Rule trait exports
 pub use crate::rule::Rule;
 

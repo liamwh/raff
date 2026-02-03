@@ -49,6 +49,69 @@ const fn severity_label(severity: Severity) -> &'static str {
     }
 }
 
+/// Renders a single-line summary of findings.
+///
+/// This function produces a minimal one-line output format suitable for
+/// pre-commit hooks and other scenarios where verbose output is undesirable.
+///
+/// # Arguments
+///
+/// * `findings` - Slice of findings to summarize
+///
+/// # Returns
+///
+/// A single-line formatted string with the summary.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use raff_core::cli_report::render_summary_line;
+/// use raff_core::ci_report::{Finding, Severity, Location};
+///
+/// let findings = vec![
+///     Finding {
+///         rule_id: "statement-count".to_string(),
+///         rule_name: "Statement Count".to_string(),
+///         severity: Severity::Error,
+///         message: "Component too large".to_string(),
+///         location: Some(Location::new("src/main.rs".to_string())),
+///         help_uri: Some("https://example.com/docs".to_string()),
+///         fingerprint: None,
+///     }
+/// ];
+///
+/// let summary = render_summary_line(&findings);
+/// assert_eq!(summary, "1 findings (1 error, 0 warnings, 0 notes)");
+/// ```
+#[must_use]
+pub fn render_summary_line(findings: &[Finding]) -> String {
+    let total = findings.len();
+    let errors = findings
+        .iter()
+        .filter(|f| f.severity == Severity::Error)
+        .count();
+    let warnings = findings
+        .iter()
+        .filter(|f| f.severity == Severity::Warning)
+        .count();
+    let notes = findings
+        .iter()
+        .filter(|f| f.severity == Severity::Note)
+        .count();
+
+    format!(
+        "{} finding{} ({} error{}, {} warning{}, {} note{})",
+        total,
+        if total == 1 { "" } else { "s" },
+        errors,
+        if errors == 1 { "" } else { "s" },
+        warnings,
+        if warnings == 1 { "" } else { "s" },
+        notes,
+        if notes == 1 { "" } else { "s" },
+    )
+}
+
 /// Returns the color attribute for a given severity level.
 ///
 /// # Arguments
@@ -468,5 +531,170 @@ mod tests {
             output.contains("See rule docs"),
             "Output should show default action text when no help URI"
         );
+    }
+
+    // Tests for render_summary_line
+
+    #[test]
+    fn test_render_summary_line_empty() {
+        let findings = vec![];
+        let summary = render_summary_line(&findings);
+        assert_eq!(summary, "0 findings (0 errors, 0 warnings, 0 notes)");
+    }
+
+    #[test]
+    fn test_render_summary_line_single_error() {
+        let findings = vec![Finding {
+            rule_id: "test-rule".to_string(),
+            rule_name: "Test Rule".to_string(),
+            severity: Severity::Error,
+            message: "Test error".to_string(),
+            location: None,
+            help_uri: None,
+            fingerprint: None,
+        }];
+
+        let summary = render_summary_line(&findings);
+        assert_eq!(summary, "1 finding (1 error, 0 warnings, 0 notes)");
+    }
+
+    #[test]
+    fn test_render_summary_line_single_warning() {
+        let findings = vec![Finding {
+            rule_id: "test-rule".to_string(),
+            rule_name: "Test Rule".to_string(),
+            severity: Severity::Warning,
+            message: "Test warning".to_string(),
+            location: None,
+            help_uri: None,
+            fingerprint: None,
+        }];
+
+        let summary = render_summary_line(&findings);
+        assert_eq!(summary, "1 finding (0 errors, 1 warning, 0 notes)");
+    }
+
+    #[test]
+    fn test_render_summary_line_single_note() {
+        let findings = vec![Finding {
+            rule_id: "test-rule".to_string(),
+            rule_name: "Test Rule".to_string(),
+            severity: Severity::Note,
+            message: "Test note".to_string(),
+            location: None,
+            help_uri: None,
+            fingerprint: None,
+        }];
+
+        let summary = render_summary_line(&findings);
+        assert_eq!(summary, "1 finding (0 errors, 0 warnings, 1 note)");
+    }
+
+    #[test]
+    fn test_render_summary_line_multiple_findings() {
+        let findings = vec![
+            Finding {
+                rule_id: "error-rule".to_string(),
+                rule_name: "Error Rule".to_string(),
+                severity: Severity::Error,
+                message: "Error".to_string(),
+                location: None,
+                help_uri: None,
+                fingerprint: None,
+            },
+            Finding {
+                rule_id: "error-rule-2".to_string(),
+                rule_name: "Error Rule 2".to_string(),
+                severity: Severity::Error,
+                message: "Error 2".to_string(),
+                location: None,
+                help_uri: None,
+                fingerprint: None,
+            },
+            Finding {
+                rule_id: "warning-rule".to_string(),
+                rule_name: "Warning Rule".to_string(),
+                severity: Severity::Warning,
+                message: "Warning".to_string(),
+                location: None,
+                help_uri: None,
+                fingerprint: None,
+            },
+            Finding {
+                rule_id: "note-rule".to_string(),
+                rule_name: "Note Rule".to_string(),
+                severity: Severity::Note,
+                message: "Note".to_string(),
+                location: None,
+                help_uri: None,
+                fingerprint: None,
+            },
+        ];
+
+        let summary = render_summary_line(&findings);
+        assert_eq!(summary, "4 findings (2 errors, 1 warning, 1 note)");
+    }
+
+    #[test]
+    fn test_render_summary_line_pluralization() {
+        let findings = vec![
+            Finding {
+                rule_id: "error-1".to_string(),
+                rule_name: "Error 1".to_string(),
+                severity: Severity::Error,
+                message: "Error 1".to_string(),
+                location: None,
+                help_uri: None,
+                fingerprint: None,
+            },
+            Finding {
+                rule_id: "error-2".to_string(),
+                rule_name: "Error 2".to_string(),
+                severity: Severity::Error,
+                message: "Error 2".to_string(),
+                location: None,
+                help_uri: None,
+                fingerprint: None,
+            },
+            Finding {
+                rule_id: "warning-1".to_string(),
+                rule_name: "Warning 1".to_string(),
+                severity: Severity::Warning,
+                message: "Warning 1".to_string(),
+                location: None,
+                help_uri: None,
+                fingerprint: None,
+            },
+            Finding {
+                rule_id: "warning-2".to_string(),
+                rule_name: "Warning 2".to_string(),
+                severity: Severity::Warning,
+                message: "Warning 2".to_string(),
+                location: None,
+                help_uri: None,
+                fingerprint: None,
+            },
+            Finding {
+                rule_id: "note-1".to_string(),
+                rule_name: "Note 1".to_string(),
+                severity: Severity::Note,
+                message: "Note 1".to_string(),
+                location: None,
+                help_uri: None,
+                fingerprint: None,
+            },
+            Finding {
+                rule_id: "note-2".to_string(),
+                rule_name: "Note 2".to_string(),
+                severity: Severity::Note,
+                message: "Note 2".to_string(),
+                location: None,
+                help_uri: None,
+                fingerprint: None,
+            },
+        ];
+
+        let summary = render_summary_line(&findings);
+        assert_eq!(summary, "6 findings (2 errors, 2 warnings, 2 notes)");
     }
 }

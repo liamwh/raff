@@ -1323,6 +1323,7 @@ verbose = true
             path: PathBuf::from("."),
             output: crate::cli::AllOutputFormat::Html,
             fast: false,
+            quiet: false,
             sc_threshold: 10,
             vol_alpha: 0.01,
             vol_since: None,

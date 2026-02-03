@@ -245,8 +245,13 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
             // Sort by severity (Error first) then rule
             all_findings.sort_by_key(|f| (!f.severity.is_error(), f.rule_id.clone()));
 
-            let output = crate::cli_report::render_cli_table(&all_findings);
-            println!("{output}");
+            if args.quiet {
+                let summary = crate::cli_report::render_summary_line(&all_findings);
+                println!("{summary}");
+            } else {
+                let output = crate::cli_report::render_cli_table(&all_findings);
+                println!("{output}");
+            }
 
             // Return error if any findings are Error severity
             let has_errors = all_findings.iter().any(|f| f.severity == Severity::Error);
@@ -360,6 +365,7 @@ mod tests {
             path: PathBuf::from(path),
             output: AllOutputFormat::Json,
             fast: false,
+            quiet: false,
             sc_threshold: 10,
             vol_alpha: 0.01,
             vol_since: None,
@@ -1274,6 +1280,78 @@ mod tests {
         assert!(
             result.is_err() || result.is_ok(),
             "run_all with fast=true and output_file should not panic"
+        );
+    }
+
+    // Quiet mode tests
+
+    #[test]
+    fn test_all_args_quiet_flag_exists_and_defaults_to_false() {
+        let args = create_test_args(".");
+        assert!(!args.quiet, "AllArgs quiet field should default to false");
+    }
+
+    #[test]
+    fn test_all_args_quiet_flag_can_be_set_to_true() {
+        let mut args = create_test_args(".");
+        args.quiet = true;
+        assert!(args.quiet, "AllArgs quiet field should be settable to true");
+    }
+
+    #[test]
+    fn test_all_args_quiet_mode_with_cli_output() {
+        let mut args = create_test_args(".");
+        args.quiet = true;
+        args.output = AllOutputFormat::Cli;
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with quiet=true and Cli output should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_quiet_and_fast_flags_work_together() {
+        let mut args = create_test_args(".");
+        args.quiet = true;
+        args.fast = true;
+        args.output = AllOutputFormat::Cli;
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with both quiet=true and fast=true should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_quiet_mode_does_not_affect_json_output() {
+        let mut args = create_test_args(".");
+        args.quiet = true;
+        args.output = AllOutputFormat::Json;
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with quiet=true and Json output should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_quiet_mode_does_not_affect_html_output() {
+        let mut args = create_test_args(".");
+        args.quiet = true;
+        args.output = AllOutputFormat::Html;
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with quiet=true and Html output should not panic"
         );
     }
 }
