@@ -78,6 +78,7 @@ pub mod counter;
 pub mod coupling_rule;
 pub mod error;
 pub mod file_utils;
+pub mod git_utils;
 pub mod html_utils;
 pub mod reporting;
 pub mod rule;
@@ -119,6 +120,9 @@ pub use crate::cache::{CacheEntry, CacheKey, CacheManager};
 
 // Error exports
 pub use crate::error::{RaffError as Error, Result};
+
+// Git utils exports
+pub use crate::git_utils::{filter_rust_files, get_staged_files};
 
 // Rule trait exports
 pub use crate::rule::Rule;
