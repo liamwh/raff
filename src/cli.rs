@@ -38,6 +38,11 @@ pub struct Cli {
     #[clap(long, global = true)]
     pub staged: bool,
 
+    /// Apply configuration profile (e.g., 'pre-commit').
+    /// Profiles provide pre-configured sets of options for common use cases.
+    #[clap(long, global = true)]
+    pub profile: Option<String>,
+
     #[command(subcommand)]
     pub command: Commands,
 }

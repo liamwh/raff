@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use raff_core::{
-    all_rules, error::Result, load_hierarchical_config, merge_all_args,
+    all_rules, apply_pre_commit_profile, error::Result, load_hierarchical_config, merge_all_args,
     merge_contributor_report_args, merge_coupling_args, merge_rust_code_analysis_args,
     merge_statement_count_args, merge_volatility_args, CacheManager, Cli, Commands,
     ConfigSourceType, ContributorReportRule, CouplingRule, RustCodeAnalysisRule,
@@ -63,11 +63,17 @@ fn main() -> Result<()> {
         );
     }
 
-    let config = &hierarchical_result.merged;
+    // Apply profile if requested via --profile flag
+    let config = if cli_args.profile.as_deref() == Some("pre-commit") {
+        tracing::info!("Applying pre-commit profile configuration");
+        apply_pre_commit_profile(&hierarchical_result.merged)
+    } else {
+        hierarchical_result.merged.clone()
+    };
 
     let run_result = match cli_args.command {
         Commands::StatementCount(args) => {
-            let mut merged_args = merge_statement_count_args(&args, config);
+            let mut merged_args = merge_statement_count_args(&args, &config);
             // Propagate global staged flag
             merged_args.staged = cli_args.staged || args.staged;
             let rule = StatementCountRule::new();
@@ -75,13 +81,13 @@ fn main() -> Result<()> {
             rule.run(&merged_args)
         }
         Commands::Volatility(args) => {
-            let merged_args = merge_volatility_args(&args, config);
+            let merged_args = merge_volatility_args(&args, &config);
             let rule = VolatilityRule::new();
             tracing::info!("Running Volatility rule with args: {:?}", merged_args);
             rule.run(&merged_args)
         }
         Commands::Coupling(args) => {
-            let mut merged_args = merge_coupling_args(&args, config);
+            let mut merged_args = merge_coupling_args(&args, &config);
             // Propagate global staged flag
             merged_args.staged = cli_args.staged || args.staged;
             let rule = CouplingRule::new();
@@ -89,20 +95,20 @@ fn main() -> Result<()> {
             rule.run(&merged_args)
         }
         Commands::RustCodeAnalysis(args) => {
-            let merged_args = merge_rust_code_analysis_args(&args, config);
+            let merged_args = merge_rust_code_analysis_args(&args, &config);
             let rule = RustCodeAnalysisRule::new();
             tracing::info!("Running RustCodeAnalysis rule with args: {:?}", merged_args);
             rule.run(&merged_args)
         }
         Commands::All(args) => {
-            let mut merged_args = merge_all_args(&args, config);
+            let mut merged_args = merge_all_args(&args, &config);
             // Propagate global staged flag
             merged_args.staged = cli_args.staged || args.staged;
             tracing::info!("Running all rules with args: {:?}", merged_args);
             all_rules::run_all(&merged_args)
         }
         Commands::ContributorReport(args) => {
-            let merged_args = merge_contributor_report_args(&args, config);
+            let merged_args = merge_contributor_report_args(&args, &config);
             let rule = ContributorReportRule::new();
             tracing::info!(
                 "Running ContributorReport rule with args: {:?}",

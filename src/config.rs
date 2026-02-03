@@ -273,6 +273,52 @@ fn default_contributor_decay() -> f64 {
     0.01
 }
 
+/// Apply the pre-commit profile configuration to a merged config.
+///
+/// This function applies the pre-commit profile settings from the configuration
+/// to create a modified config with profile defaults. CLI flags can still
+/// override these values.
+///
+/// # Arguments
+///
+/// * `config` - The merged configuration to apply the profile to
+///
+/// # Returns
+///
+/// A modified `RaffConfig` with pre-commit profile settings applied.
+/// If no pre-commit profile is defined, returns the config unchanged.
+///
+/// # Examples
+///
+/// ```
+/// use raff_core::config::{RaffConfig, apply_pre_commit_profile};
+///
+/// let config = RaffConfig::default();
+/// let modified = apply_pre_commit_profile(&config);
+/// ```
+#[must_use]
+pub fn apply_pre_commit_profile(config: &RaffConfig) -> RaffConfig {
+    let pc = match &config.profile.pre_commit {
+        Some(p) => p,
+        None => return config.clone(),
+    };
+
+    let mut result = config.clone();
+
+    // Apply statement count threshold from profile if set
+    if let Some(threshold) = pc.sc_threshold {
+        result.statement_count.threshold = threshold;
+    }
+
+    // Note: fast, staged, and quiet are CLI-only flags that are applied
+    // in the CLI layer, not here in the config. The profile values are
+    // available for inspection but don't modify the config directly.
+    // This is by design - these flags control runtime behavior, not
+    // configuration state.
+
+    result
+}
+
 /// Load configuration from a specific file path.
 ///
 /// # Arguments
@@ -1595,5 +1641,124 @@ sc_threshold = 15
         assert_eq!(profile.staged, Some(false));
         assert_eq!(profile.quiet, Some(true));
         assert_eq!(profile.sc_threshold, Some(15));
+    }
+
+    #[test]
+    fn test_apply_pre_commit_profile_with_no_profile_returns_config_unchanged() {
+        let config = RaffConfig::default();
+        let original_threshold = config.statement_count.threshold;
+
+        let result = apply_pre_commit_profile(&config);
+
+        assert_eq!(
+            result.statement_count.threshold, original_threshold,
+            "threshold should remain unchanged when no profile is set"
+        );
+    }
+
+    #[test]
+    fn test_apply_pre_commit_profile_applies_sc_threshold() {
+        let mut config = RaffConfig::default();
+        config.statement_count.threshold = 10; // Default
+        config.profile.pre_commit = Some(PreCommitProfile {
+            fast: Some(true),
+            staged: Some(true),
+            quiet: Some(true),
+            sc_threshold: Some(20),
+        });
+
+        let result = apply_pre_commit_profile(&config);
+
+        assert_eq!(
+            result.statement_count.threshold, 20,
+            "threshold should be updated to profile value"
+        );
+    }
+
+    #[test]
+    fn test_apply_pre_commit_profile_preserves_other_config_values() {
+        let mut config = RaffConfig::default();
+        config.statement_count.threshold = 25;
+        config.volatility.alpha = 0.05;
+        config.general.verbose = true;
+        config.profile.pre_commit = Some(PreCommitProfile {
+            fast: Some(true),
+            staged: Some(true),
+            quiet: Some(true),
+            sc_threshold: Some(15),
+        });
+
+        let result = apply_pre_commit_profile(&config);
+
+        assert_eq!(
+            result.statement_count.threshold, 15,
+            "sc_threshold should be applied"
+        );
+        assert_eq!(
+            result.volatility.alpha, 0.05,
+            "volatility alpha should be preserved"
+        );
+        assert!(
+            result.general.verbose,
+            "general verbose should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_apply_pre_commit_profile_with_partial_profile() {
+        let mut config = RaffConfig::default();
+        config.statement_count.threshold = 10;
+        config.profile.pre_commit = Some(PreCommitProfile {
+            fast: None,
+            staged: None,
+            quiet: None,
+            sc_threshold: Some(30),
+        });
+
+        let result = apply_pre_commit_profile(&config);
+
+        assert_eq!(
+            result.statement_count.threshold, 30,
+            "only sc_threshold should be applied"
+        );
+    }
+
+    #[test]
+    fn test_apply_pre_commit_profile_does_not_modify_original_config() {
+        let mut config = RaffConfig::default();
+        config.statement_count.threshold = 10;
+        config.profile.pre_commit = Some(PreCommitProfile {
+            fast: Some(true),
+            staged: Some(true),
+            quiet: Some(true),
+            sc_threshold: Some(25),
+        });
+
+        let original_threshold = config.statement_count.threshold;
+        let _ = apply_pre_commit_profile(&config);
+
+        assert_eq!(
+            config.statement_count.threshold, original_threshold,
+            "original config should not be modified"
+        );
+    }
+
+    #[test]
+    fn test_apply_pre_commit_profile_with_zero_threshold() {
+        let mut config = RaffConfig::default();
+        config.statement_count.threshold = 10;
+        config.profile.pre_commit = Some(PreCommitProfile {
+            fast: Some(true),
+            staged: Some(true),
+            quiet: Some(true),
+            sc_threshold: Some(0),
+        });
+
+        let result = apply_pre_commit_profile(&config);
+
+        assert_eq!(
+            result.statement_count.threshold, 0,
+            "zero threshold should be applied"
+        );
     }
 }

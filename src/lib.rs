@@ -103,11 +103,11 @@ pub use crate::volatility_rule::VolatilityRule;
 
 // Config exports
 pub use crate::config::{
-    load_config, load_config_from_path, merge_all_args, merge_contributor_report_args,
-    merge_coupling_args, merge_rust_code_analysis_args, merge_statement_count_args,
-    merge_volatility_args, ContributorReportConfig, CouplingConfig, GeneralConfig,
-    PreCommitProfile, ProfileConfig, RaffConfig, RustCodeAnalysisConfig, StatementCountConfig,
-    VolatilityConfig,
+    apply_pre_commit_profile, load_config, load_config_from_path, merge_all_args,
+    merge_contributor_report_args, merge_coupling_args, merge_rust_code_analysis_args,
+    merge_statement_count_args, merge_volatility_args, ContributorReportConfig, CouplingConfig,
+    GeneralConfig, PreCommitProfile, ProfileConfig, RaffConfig, RustCodeAnalysisConfig,
+    StatementCountConfig, VolatilityConfig,
 };
 
 // Config hierarchy exports
