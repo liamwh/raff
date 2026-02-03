@@ -33,6 +33,11 @@ pub struct Cli {
     #[clap(long, global = true)]
     pub output_file: Option<std::path::PathBuf>,
 
+    /// Analyze only git-staged files (pre-commit mode).
+    /// When set, only analyzes files that are staged for commit.
+    #[clap(long, global = true)]
+    pub staged: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -101,6 +106,10 @@ pub struct StatementCountArgs {
     /// When specified, writes output to the file instead of stdout.
     #[clap(long)]
     pub output_file: Option<std::path::PathBuf>,
+
+    /// Analyze only git-staged files (pre-commit mode).
+    #[clap(long)]
+    pub staged: bool,
 }
 
 /// Enum representing the supported output formats for the volatility report.
@@ -199,6 +208,10 @@ pub struct CouplingArgs {
     /// When specified, writes output to the file instead of stdout.
     #[clap(long)]
     pub output_file: Option<std::path::PathBuf>,
+
+    /// Analyze only git-staged files (pre-commit mode).
+    #[clap(long)]
+    pub staged: bool,
 }
 
 /// Output format for the rust-code-analysis subcommand.
@@ -333,6 +346,10 @@ pub struct AllArgs {
     /// Precedence: CLI flag > config file > stdout.
     #[clap(long)]
     pub output_file: Option<std::path::PathBuf>,
+
+    /// Analyze only git-staged files (pre-commit mode).
+    #[clap(long)]
+    pub staged: bool,
 }
 
 /// Enum representing the supported output formats for the contributor report.

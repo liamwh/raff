@@ -9,6 +9,7 @@ fn main() -> Result<()> {
         granularity: CouplingGranularity::Module,
         ci_output: None,
         output_file: None,
+        staged: false,
     };
 
     let rule = CouplingRule::new();

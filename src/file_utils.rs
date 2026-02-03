@@ -57,6 +57,51 @@ pub fn collect_all_rs(dir: &Path, out_files: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+/// Collect Rust source files for analysis, either all files or only staged files.
+///
+/// This function provides the appropriate file list based on the `staged` flag:
+/// - If `staged` is true, returns only git-staged `.rs` files
+/// - If `staged` is false, returns all `.rs` files under `dir`
+///
+/// # Parameters
+/// - `dir`: the directory to analyze (e.g. "./src")
+/// - `staged`: if true, only return git-staged files; if false, return all files
+/// - `out_files`: a `Vec<PathBuf>` to push discovered files into
+///
+/// # Returns
+/// - `Ok(())` if successful
+/// - `Err` if file collection fails
+///
+/// # Notes
+/// When `staged` is true and no staged `.rs` files are found (or not in a git repo),
+/// this function falls back to collecting all files to avoid breaking analysis.
+pub fn collect_rs_files(dir: &Path, staged: bool, out_files: &mut Vec<PathBuf>) -> Result<()> {
+    if staged {
+        // Try to get staged files
+        if let Ok(staged_files) = crate::git_utils::get_staged_files() {
+            let rust_files = crate::git_utils::filter_rust_files(&staged_files);
+            if !rust_files.is_empty() {
+                // Filter to only files within the analysis directory
+                let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+                for file in rust_files {
+                    // Only include files that are within the analysis directory
+                    if file.starts_with(&canonical_dir) || file.starts_with(dir) {
+                        out_files.push(file);
+                    }
+                }
+                if !out_files.is_empty() {
+                    return Ok(());
+                }
+                // If no staged files in the analysis directory, fall through to full collection
+            }
+            // If no staged Rust files found, fall through to full collection
+        }
+        // If git failed or no staged files, collect all files
+    }
+    // Default behavior: collect all .rs files
+    collect_all_rs(dir, out_files)
+}
+
 /// Given a full file path (e.g. "/.../mycrate/src/foo/bar.rs") and the `src_dir` (e.g. "src"),
 /// return a "namespace" string:
 /// 1) Strip the `src_dir` prefix, including the path separator.

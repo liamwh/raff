@@ -1100,6 +1100,7 @@ verbose = true
             output: crate::cli::StatementCountOutputFormat::Table,
             ci_output: None,
             output_file: None,
+            staged: false,
         };
 
         let merged = merge_statement_count_args(&cli_args, &config);
@@ -1125,6 +1126,7 @@ verbose = true
             output: crate::cli::StatementCountOutputFormat::Table,
             ci_output: None,
             output_file: None,
+            staged: false,
         };
 
         let merged = merge_statement_count_args(&cli_args, &config);
@@ -1150,6 +1152,7 @@ verbose = true
             output: crate::cli::StatementCountOutputFormat::Html,
             ci_output: None,
             output_file: None,
+            staged: false,
         };
 
         let merged = merge_statement_count_args(&cli_args, &config);
@@ -1241,6 +1244,7 @@ verbose = true
             granularity: crate::cli::CouplingGranularity::Both,
             ci_output: None,
             output_file: None,
+            staged: false,
         };
 
         let merged = merge_coupling_args(&cli_args, &config);
@@ -1336,6 +1340,7 @@ verbose = true
             rca_language: "rust".to_string(),
             ci_output: None,
             output_file: None,
+            staged: false,
         };
 
         let merged = merge_all_args(&cli_args, &config);

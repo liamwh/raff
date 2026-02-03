@@ -1844,6 +1844,7 @@ fn main() {
             granularity: CouplingGranularity::Crate,
             ci_output: None,
             output_file: None,
+            staged: false,
         };
 
         // Call the Rule trait's run method
@@ -1890,6 +1891,7 @@ fn main() {
             granularity: CouplingGranularity::Crate,
             ci_output: None,
             output_file: None,
+            staged: false,
         };
 
         // Call the Rule trait's analyze method
@@ -1924,6 +1926,7 @@ fn main() {
             granularity: CouplingGranularity::Crate,
             ci_output: None,
             output_file: None,
+            staged: false,
         };
 
         // Call the Rule trait's analyze method
@@ -1948,6 +1951,7 @@ fn main() {
             granularity: CouplingGranularity::Crate,
             ci_output: None,
             output_file: None,
+            staged: false,
         };
 
         // Verify Data type is CouplingData
@@ -2190,6 +2194,7 @@ fn main() {
             granularity: CouplingGranularity::Crate,
             ci_output: Some(CiOutputFormat::Sarif),
             output_file: None,
+            staged: false,
         };
 
         let result = rule.run(&args);
@@ -2231,6 +2236,7 @@ fn main() {
             granularity: CouplingGranularity::Crate,
             ci_output: Some(CiOutputFormat::JUnit),
             output_file: None,
+            staged: false,
         };
 
         let result = rule.run(&args);
@@ -2272,6 +2278,7 @@ fn main() {
             granularity: CouplingGranularity::Crate,
             ci_output: Some(CiOutputFormat::Sarif),
             output_file: None,
+            staged: false,
         };
 
         let result = rule.run(&args);

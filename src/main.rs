@@ -67,7 +67,9 @@ fn main() -> Result<()> {
 
     let run_result = match cli_args.command {
         Commands::StatementCount(args) => {
-            let merged_args = merge_statement_count_args(&args, config);
+            let mut merged_args = merge_statement_count_args(&args, config);
+            // Propagate global staged flag
+            merged_args.staged = cli_args.staged || args.staged;
             let rule = StatementCountRule::new();
             tracing::info!("Running StatementCount rule with args: {:?}", merged_args);
             rule.run(&merged_args)
@@ -79,7 +81,9 @@ fn main() -> Result<()> {
             rule.run(&merged_args)
         }
         Commands::Coupling(args) => {
-            let merged_args = merge_coupling_args(&args, config);
+            let mut merged_args = merge_coupling_args(&args, config);
+            // Propagate global staged flag
+            merged_args.staged = cli_args.staged || args.staged;
             let rule = CouplingRule::new();
             tracing::info!("Running Coupling rule with args: {:?}", merged_args);
             rule.run(&merged_args)
@@ -91,7 +95,9 @@ fn main() -> Result<()> {
             rule.run(&merged_args)
         }
         Commands::All(args) => {
-            let merged_args = merge_all_args(&args, config);
+            let mut merged_args = merge_all_args(&args, config);
+            // Propagate global staged flag
+            merged_args.staged = cli_args.staged || args.staged;
             tracing::info!("Running all rules with args: {:?}", merged_args);
             all_rules::run_all(&merged_args)
         }

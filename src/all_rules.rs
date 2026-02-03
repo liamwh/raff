@@ -123,6 +123,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         output: crate::cli::StatementCountOutputFormat::Table, // format is irrelevant for analyze
         ci_output: None,
         output_file: args.output_file.clone(),
+        staged: args.staged,
     };
     let vol_args = crate::cli::VolatilityArgs {
         path: args.path.clone(),
@@ -140,6 +141,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         output: crate::cli::CouplingOutputFormat::Table, // format is irrelevant for analyze
         ci_output: None,
         output_file: args.output_file.clone(),
+        staged: args.staged,
     };
     let rca_args = crate::cli::RustCodeAnalysisArgs {
         path: args.path.clone(),
@@ -378,6 +380,7 @@ mod tests {
             rca_language: "rust".to_string(),
             ci_output: None,
             output_file: None,
+            staged: false,
         }
     }
 
@@ -393,6 +396,7 @@ mod tests {
             output: crate::cli::StatementCountOutputFormat::Table,
             ci_output: None,
             output_file: None,
+            staged: false,
         }
     }
 
@@ -421,6 +425,7 @@ mod tests {
             output: CouplingOutputFormat::Table,
             ci_output: None,
             output_file: None,
+            staged: false,
         }
     }
 
@@ -623,6 +628,7 @@ mod tests {
             output: crate::cli::StatementCountOutputFormat::Table,
             ci_output: None,
             output_file: None,
+            staged: all_args.staged,
         };
 
         assert_eq!(
@@ -692,6 +698,7 @@ mod tests {
             output: CouplingOutputFormat::Table,
             ci_output: None,
             output_file: None,
+            staged: all_args.staged,
         };
 
         assert_eq!(

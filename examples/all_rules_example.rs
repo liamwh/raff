@@ -20,6 +20,7 @@ fn main() -> Result<()> {
         rca_language: "rust".to_string(),
         ci_output: None,
         output_file: None,
+        staged: false,
     };
 
     all_rules::run_all(&args)

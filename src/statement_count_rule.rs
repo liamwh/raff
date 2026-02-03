@@ -62,7 +62,7 @@ use crate::ci_report::{Finding, Severity, ToFindings};
 use crate::cli::{CiOutputFormat, StatementCountArgs, StatementCountOutputFormat}; // Import the specific args struct
 use crate::counter::StmtCounter; // Assuming counter.rs is at crate::counter
 use crate::error::{RaffError, Result};
-use crate::file_utils::{collect_all_rs, relative_namespace, top_level_component}; // Assuming file_utils.rs is at crate::file_utils
+use crate::file_utils::{relative_namespace, top_level_component}; // Assuming file_utils.rs is at crate::file_utils
 use crate::html_utils; // Now using Maud-based html_utils
 use crate::reporting::print_report; // Assuming reporting.rs is at crate::reporting // Import the new HTML utilities
 use crate::rule::Rule;
@@ -286,7 +286,7 @@ impl StatementCountRule {
         }
 
         let mut all_rs_files: Vec<PathBuf> = Vec::new();
-        collect_all_rs(analysis_path, &mut all_rs_files)?;
+        crate::file_utils::collect_rs_files(analysis_path, args.staged, &mut all_rs_files)?;
 
         if all_rs_files.is_empty() {
             return Err(RaffError::analysis_error(
@@ -503,6 +503,7 @@ pub fn func_b() {
             output: StatementCountOutputFormat::Table,
             ci_output: None,
             output_file: None,
+            staged: false,
         }
     }
 
@@ -924,6 +925,7 @@ pub fn func_b() {
             output: StatementCountOutputFormat::Table,
             ci_output: None,
             output_file: None,
+            staged: false,
         };
 
         // Verify Data type is StatementCountData
