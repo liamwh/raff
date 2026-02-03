@@ -1322,6 +1322,7 @@ verbose = true
         let cli_args = crate::cli::AllArgs {
             path: PathBuf::from("."),
             output: crate::cli::AllOutputFormat::Html,
+            fast: false,
             sc_threshold: 10,
             vol_alpha: 0.01,
             vol_since: None,

@@ -273,6 +273,11 @@ pub struct AllArgs {
     #[clap(long, value_enum, default_value_t = AllOutputFormat::default())]
     pub output: AllOutputFormat,
 
+    /// Run only fast rules (statement-count, coupling).
+    /// Skips slow rules like volatility and rust-code-analysis.
+    #[clap(long)]
+    pub fast: bool,
+
     /// Percentage threshold for component size (0-100).
     #[clap(long, default_value_t = 10)]
     pub sc_threshold: usize,

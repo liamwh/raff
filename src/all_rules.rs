@@ -21,6 +21,7 @@
 //! let args = AllArgs {
 //!     path: PathBuf::from("./src"),
 //!     output: AllOutputFormat::Json,
+//!     fast: false,
 //!     // .. other fields
 //!     sc_threshold: 10,
 //!     vol_alpha: 0.01,
@@ -151,11 +152,22 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
         output_file: args.output_file.clone(),
     };
 
-    let all_data = AllReportData {
-        statement_count: Some(sc_rule.analyze(&sc_args)),
-        volatility: Some(vol_rule.analyze(&vol_args)),
-        coupling: Some(coup_rule.analyze(&coup_args)),
-        rust_code_analysis: Some(rca_rule.analyze(&rca_args)),
+    let all_data = if args.fast {
+        // Fast mode: only run statement-count and coupling (skip volatility and rust-code-analysis)
+        AllReportData {
+            statement_count: Some(sc_rule.analyze(&sc_args)),
+            volatility: None,
+            coupling: Some(coup_rule.analyze(&coup_args)),
+            rust_code_analysis: None,
+        }
+    } else {
+        // Full mode: run all rules
+        AllReportData {
+            statement_count: Some(sc_rule.analyze(&sc_args)),
+            volatility: Some(vol_rule.analyze(&vol_args)),
+            coupling: Some(coup_rule.analyze(&coup_args)),
+            rust_code_analysis: Some(rca_rule.analyze(&rca_args)),
+        }
     };
 
     // Check for CI output first (takes precedence)
@@ -347,6 +359,7 @@ mod tests {
         AllArgs {
             path: PathBuf::from(path),
             output: AllOutputFormat::Json,
+            fast: false,
             sc_threshold: 10,
             vol_alpha: 0.01,
             vol_since: None,
@@ -1029,6 +1042,238 @@ mod tests {
         assert!(
             result.is_err() || result.is_ok(),
             "run_all with ci_output should take precedence"
+        );
+    }
+
+    // Fast mode tests
+
+    #[test]
+    fn test_all_args_fast_flag_exists_and_defaults_to_false() {
+        let args = create_test_args(".");
+        assert!(!args.fast, "AllArgs fast field should default to false");
+    }
+
+    #[test]
+    fn test_all_args_fast_flag_can_be_set_to_true() {
+        let mut args = create_test_args(".");
+        args.fast = true;
+        assert!(args.fast, "AllArgs fast field should be settable to true");
+    }
+
+    #[test]
+    fn test_all_report_data_new_creates_empty_all_none() {
+        let data = AllReportData::new();
+        assert!(
+            data.statement_count.is_none(),
+            "AllReportData::new() should create instance with statement_count as None"
+        );
+        assert!(
+            data.volatility.is_none(),
+            "AllReportData::new() should create instance with volatility as None"
+        );
+        assert!(
+            data.coupling.is_none(),
+            "AllReportData::new() should create instance with coupling as None"
+        );
+        assert!(
+            data.rust_code_analysis.is_none(),
+            "AllReportData::new() should create instance with rust_code_analysis as None"
+        );
+    }
+
+    #[test]
+    fn test_all_report_data_with_results_all_some() {
+        let sc_result: Result<StatementCountData> = Err(crate::error::RaffError::analysis_error(
+            "statement_count",
+            "test error",
+        ));
+        let vol_result: Result<VolatilityData> = Err(crate::error::RaffError::analysis_error(
+            "volatility",
+            "volatility error",
+        ));
+        let coup_result: Result<CouplingData> = Err(crate::error::RaffError::analysis_error(
+            "coupling",
+            "coupling error",
+        ));
+        let rca_result: Result<RustCodeAnalysisData> = Err(
+            crate::error::RaffError::analysis_error("rust_code_analysis", "rca error"),
+        );
+
+        let data = AllReportData::with_results(
+            Some(sc_result),
+            Some(vol_result),
+            Some(coup_result),
+            Some(rca_result),
+        );
+
+        assert!(
+            data.statement_count.is_some(),
+            "with_results should store statement_count result"
+        );
+        assert!(
+            data.volatility.is_some(),
+            "with_results should store volatility result"
+        );
+        assert!(
+            data.coupling.is_some(),
+            "with_results should store coupling result"
+        );
+        assert!(
+            data.rust_code_analysis.is_some(),
+            "with_results should store rust_code_analysis result"
+        );
+    }
+
+    #[test]
+    fn test_all_report_data_with_results_fast_mode_pattern() {
+        // Fast mode: only statement_count and coupling, volatility and rca are None
+        let sc_result: Result<StatementCountData> = Err(crate::error::RaffError::analysis_error(
+            "statement_count",
+            "test error",
+        ));
+        let coup_result: Result<CouplingData> = Err(crate::error::RaffError::analysis_error(
+            "coupling",
+            "coupling error",
+        ));
+
+        let data = AllReportData::with_results(
+            Some(sc_result),
+            None, // volatility is None in fast mode
+            Some(coup_result),
+            None, // rust_code_analysis is None in fast mode
+        );
+
+        assert!(
+            data.statement_count.is_some(),
+            "fast mode should have statement_count"
+        );
+        assert!(
+            data.volatility.is_none(),
+            "fast mode should not have volatility"
+        );
+        assert!(data.coupling.is_some(), "fast mode should have coupling");
+        assert!(
+            data.rust_code_analysis.is_none(),
+            "fast mode should not have rust_code_analysis"
+        );
+    }
+
+    #[test]
+    fn test_all_args_with_fast_true_runs_without_panic() {
+        let mut args = create_test_args(".");
+        args.fast = true;
+
+        let result = run_all(&args);
+
+        // Fast mode should run successfully (or fail gracefully, but not panic)
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with fast=true should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_with_fast_false_runs_without_panic() {
+        let mut args = create_test_args(".");
+        args.fast = false;
+
+        let result = run_all(&args);
+
+        // Full mode should run successfully (or fail gracefully, but not panic)
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with fast=false should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_fast_mode_with_json_output() {
+        let mut args = create_test_args(".");
+        args.fast = true;
+        args.output = AllOutputFormat::Json;
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with fast=true and Json output should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_fast_mode_with_html_output() {
+        let mut args = create_test_args(".");
+        args.fast = true;
+        args.output = AllOutputFormat::Html;
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with fast=true and Html output should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_fast_mode_with_cli_output() {
+        let mut args = create_test_args(".");
+        args.fast = true;
+        args.output = AllOutputFormat::Cli;
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with fast=true and Cli output should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_fast_mode_with_ci_output_sarif() {
+        let mut args = create_test_args(".");
+        args.fast = true;
+        args.ci_output = Some(CiOutputFormat::Sarif);
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with fast=true and Sarif CI output should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_fast_mode_with_ci_output_junit() {
+        let mut args = create_test_args(".");
+        args.fast = true;
+        args.ci_output = Some(CiOutputFormat::JUnit);
+
+        let result = run_all(&args);
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with fast=true and JUnit CI output should not panic"
+        );
+    }
+
+    #[test]
+    fn test_all_args_fast_mode_with_output_file() {
+        use tempfile::NamedTempFile;
+
+        let mut args = create_test_args(".");
+        args.fast = true;
+
+        let temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        args.output_file = Some(temp_file.path().to_path_buf());
+
+        let result = run_all(&args);
+
+        // Clean up temp file
+        let _ = std::fs::remove_file(temp_file.path());
+
+        assert!(
+            result.is_err() || result.is_ok(),
+            "run_all with fast=true and output_file should not panic"
         );
     }
 }

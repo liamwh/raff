@@ -6,6 +6,7 @@ fn main() -> Result<()> {
     let args = AllArgs {
         path: PathBuf::from("."),
         output: AllOutputFormat::Html,
+        fast: false,
         sc_threshold: 10,
         vol_alpha: 0.01,
         vol_since: None,
