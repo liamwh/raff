@@ -1,0 +1,8 @@
+---
+source: tests/cli_output_golden.rs
+expression: output
+---
+─────────────────────────────────────────
+ Severity  Rule  Location  Issue  Action 
+═════════════════════════════════════════
+─────────────────────────────────────────

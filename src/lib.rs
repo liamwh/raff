@@ -25,6 +25,7 @@
 //! - [`all_rules`] - Orchestration for running all rules
 //! - [`cache`] - Result caching for improved performance
 //! - [`ci_report`] - CI/CD platform report generation (SARIF, JUnit)
+//! - [`cli_report`] - CLI-friendly table output for terminal consumption
 //!
 //! ## Usage as a Library
 //!
@@ -69,6 +70,7 @@ pub mod all_rules;
 pub mod cache;
 pub mod ci_report;
 pub mod cli;
+pub mod cli_report;
 pub mod config;
 pub mod config_hierarchy;
 pub mod contributor_report;

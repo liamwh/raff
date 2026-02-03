@@ -213,6 +213,56 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
     }
 
     match args.output {
+        AllOutputFormat::Cli => {
+            // Collect all findings from all rules
+            let mut all_findings = Vec::new();
+
+            if let Some(Ok(data)) = &all_data.statement_count {
+                all_findings.extend(data.to_findings());
+            }
+            if let Some(Ok(data)) = &all_data.volatility {
+                all_findings.extend(data.to_findings());
+            }
+            if let Some(Ok(data)) = &all_data.coupling {
+                all_findings.extend(data.to_findings());
+            }
+            if let Some(Ok(data)) = &all_data.rust_code_analysis {
+                all_findings.extend(data.to_findings());
+            }
+
+            // Sort by severity (Error first) then rule
+            all_findings.sort_by_key(|f| (!f.severity.is_error(), f.rule_id.clone()));
+
+            let output = crate::cli_report::render_cli_table(&all_findings);
+            println!("{output}");
+
+            // Return error if any findings are Error severity
+            let has_errors = all_findings.iter().any(|f| f.severity == Severity::Error);
+            if has_errors {
+                return Err(crate::error::RaffError::analysis_error(
+                    "all",
+                    format!(
+                        "Found {} issue{} ({} error{})",
+                        all_findings.len(),
+                        if all_findings.len() == 1 { "" } else { "s" },
+                        all_findings
+                            .iter()
+                            .filter(|f| f.severity == Severity::Error)
+                            .count(),
+                        if all_findings
+                            .iter()
+                            .filter(|f| f.severity == Severity::Error)
+                            .count()
+                            == 1
+                        {
+                            ""
+                        } else {
+                            "s"
+                        }
+                    ),
+                ));
+            }
+        }
         AllOutputFormat::Json => {
             let mut errors = Vec::new();
             if let Some(Err(e)) = &all_data.statement_count {

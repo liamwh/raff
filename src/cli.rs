@@ -258,6 +258,8 @@ pub enum AllOutputFormat {
     #[default]
     Html,
     Json,
+    /// Actionable CLI table format for terminal consumption
+    Cli,
 }
 
 /// Arguments for the `all` subcommand.
