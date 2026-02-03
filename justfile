@@ -129,3 +129,15 @@ validate-hooks:
     @echo "🔍 Validating pre-commit config..."
     @prek validate-config
 
+# Install raff to ~/bin
+install:
+    #!/bin/bash
+    set -e
+    BIN_DIR="$HOME/bin"
+    mkdir -p "$BIN_DIR"
+    echo "🔨 Building raff..."
+    cargo build --release
+    echo "📦 Installing raff to $BIN_DIR..."
+    cp target/release/raff "$BIN_DIR/raff"
+    echo "✅ raff installed to $BIN_DIR/raff"
+
