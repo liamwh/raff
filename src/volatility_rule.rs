@@ -133,7 +133,7 @@ pub type CrateStatsMap = HashMap<String, CrateStats>;
 
 /// Cache version for volatility data.
 /// Increment this when the serialization format changes to invalidate old cache entries.
-const VOLATILITY_CACHE_VERSION: &str = "1";
+const VOLATILITY_CACHE_VERSION: &str = "2";
 
 /// Rule to calculate code volatility for each crate in a Git repository.
 #[derive(Debug, Default)]

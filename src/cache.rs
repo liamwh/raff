@@ -72,6 +72,9 @@ const MAX_CACHE_ENTRIES: usize = 1000;
 /// Maximum age of cache entries in seconds (7 days).
 const MAX_CACHE_AGE_SECONDS: u64 = 7 * 24 * 60 * 60;
 
+/// Cache entry format version - increment when CacheEntry or serialization format changes
+const CACHE_ENTRY_VERSION: u32 = 1;
+
 /// A cache key that uniquely identifies an analysis operation.
 ///
 /// The key incorporates file hashes, git state, and analysis parameters
@@ -186,6 +189,10 @@ impl CacheKey {
 /// for cache management (timestamp, size).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheEntry {
+    /// Format version for compatibility checking
+    #[serde(default = "default_cache_version")]
+    version: u32,
+
     /// The cached result data as raw bytes.
     pub data: Vec<u8>,
 
@@ -194,6 +201,11 @@ pub struct CacheEntry {
 
     /// Size of the cached data in bytes.
     size_bytes: usize,
+}
+
+/// Default value for the version field (for backward compatibility)
+fn default_cache_version() -> u32 {
+    CACHE_ENTRY_VERSION
 }
 
 impl CacheEntry {
@@ -206,6 +218,7 @@ impl CacheEntry {
     pub fn new(data: Vec<u8>) -> Self {
         let size_bytes = data.len();
         Self {
+            version: CACHE_ENTRY_VERSION,
             data,
             timestamp: current_timestamp(),
             size_bytes,
@@ -343,6 +356,8 @@ impl CacheManager {
     /// - Caching is disabled
     /// - No entry exists for the key
     /// - The entry has expired
+    /// - The entry has an incompatible version
+    /// - The entry cannot be deserialized (treated as stale cache)
     ///
     /// # Arguments
     ///
@@ -350,7 +365,7 @@ impl CacheManager {
     ///
     /// # Errors
     ///
-    /// Returns an error if the cache file cannot be read or deserialized.
+    /// Returns an error if the cache file cannot be read.
     pub fn get(&self, key: &CacheKey) -> Result<Option<CacheEntry>> {
         if !self.enabled {
             return Ok(None);
@@ -365,21 +380,38 @@ impl CacheManager {
             RaffError::io_error_with_source("read cache entry", cache_path.clone(), e)
         })?;
 
-        let entry: CacheEntry = bincode::deserialize(&bytes).map_err(|e| {
-            RaffError::parse_error_with_file(
-                cache_path.clone(),
-                format!("Failed to deserialize cache entry: {}", e),
-            )
-        })?;
+        // Try to deserialize, treating version mismatch or deserialization failure as cache miss
+        match bincode::deserialize::<CacheEntry>(&bytes) {
+            Ok(entry) => {
+                // Check version matches
+                if entry.version != CACHE_ENTRY_VERSION {
+                    tracing::debug!(
+                        "Cache entry version mismatch (expected {}, got {}), removing stale cache",
+                        CACHE_ENTRY_VERSION,
+                        entry.version
+                    );
+                    let _ = fs::remove_file(&cache_path);
+                    return Ok(None);
+                }
 
-        // Check if entry has expired
-        if entry.is_expired(MAX_CACHE_AGE_SECONDS) {
-            // Remove expired entry
-            let _ = fs::remove_file(&cache_path);
-            return Ok(None);
+                // Check if entry has expired
+                if entry.is_expired(MAX_CACHE_AGE_SECONDS) {
+                    let _ = fs::remove_file(&cache_path);
+                    return Ok(None);
+                }
+
+                Ok(Some(entry))
+            }
+            Err(e) => {
+                // Deserialization failed - likely format change or corruption
+                tracing::debug!(
+                    "Failed to deserialize cache entry (likely stale format): {}, removing",
+                    e
+                );
+                let _ = fs::remove_file(&cache_path);
+                Ok(None)
+            }
         }
-
-        Ok(Some(entry))
     }
 
     /// Stores a cache entry for the given key.
