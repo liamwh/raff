@@ -26,6 +26,7 @@
 //!     output: StatementCountOutputFormat::Table,
 //!     ci_output: None,
 //!     output_file: None,
+//!     staged: false,
 //! };
 //!
 //! if let Err(e) = rule.run(&args) {

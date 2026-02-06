@@ -46,6 +46,7 @@
 //!     output: StatementCountOutputFormat::Table,
 //!     ci_output: None,
 //!     output_file: None,
+//!     staged: false,
 //! };
 //!
 //! // Run the analysis
@@ -106,8 +107,8 @@ pub use crate::config::{
     apply_pre_commit_profile, load_config, load_config_from_path, merge_all_args,
     merge_contributor_report_args, merge_coupling_args, merge_rust_code_analysis_args,
     merge_statement_count_args, merge_volatility_args, ContributorReportConfig, CouplingConfig,
-    GeneralConfig, PreCommitProfile, ProfileConfig, RaffConfig, RustCodeAnalysisConfig,
-    StatementCountConfig, VolatilityConfig,
+    GeneralConfig, PreCommitProfile, PreCommitSettings, ProfileConfig, RaffConfig,
+    RustCodeAnalysisConfig, StatementCountConfig, VolatilityConfig,
 };
 
 // Config hierarchy exports

@@ -55,6 +55,46 @@ pub fn get_staged_files() -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
+/// Gets the git repository root directory.
+///
+/// Runs `git rev-parse --show-toplevel` to find the repository root.
+/// Returns Ok(None) if not in a git repository.
+///
+/// # Returns
+///
+/// * `Ok(Some(PathBuf))` - Path to the repository root
+/// * `Ok(None)` - Not in a git repository
+/// * `Err(RaffError)` - Git command execution failed
+///
+/// # Examples
+///
+/// ```no_run
+/// use raff_core::git_utils;
+///
+/// # fn main() -> raff_core::error::Result<()> {
+/// match git_utils::get_repo_root()? {
+///     Some(root) => println!("Repo root: {:?}", root),
+///     None => println!("Not in a git repo"),
+/// }
+/// # Ok(())
+/// # }
+/// ```
+#[instrument(skip(), ret, level = "debug")]
+pub fn get_repo_root() -> Result<Option<PathBuf>> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|e| RaffError::git_error(format!("git rev-parse failed: {}", e)))?;
+
+    if !output.status.success() {
+        tracing::debug!("git rev-parse --show-toplevel failed or not in git repo");
+        return Ok(None);
+    }
+
+    let path = String::from_utf8_lossy(&output.stdout);
+    Ok(Some(PathBuf::from(path.trim())))
+}
+
 /// Filters a list of files to only include Rust source files (`.rs` extension).
 ///
 /// # Arguments
@@ -324,6 +364,114 @@ mod tests {
             files[0],
             PathBuf::from("test.rs"),
             "get_staged_files should return the correct file name"
+        );
+    }
+
+    #[test]
+    fn test_get_repo_root_returns_none_when_not_in_git() {
+        // Create a temp directory that is not a git repo
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+        // Change to the non-git directory
+        let original_dir = std::env::current_dir().expect("Failed to get current dir");
+        std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
+
+        // get_repo_root should return Ok with None when not in git
+        let result = get_repo_root();
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
+
+        assert!(
+            result.is_ok(),
+            "get_repo_root should not error when not in a git repo"
+        );
+        let root = result.unwrap();
+        assert!(
+            root.is_none(),
+            "get_repo_root should return None when not in git"
+        );
+    }
+
+    #[test]
+    fn test_get_repo_root_finds_git_repo() {
+        // Create a temp git repo
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+        // Initialize git repo
+        let status = Command::new("git")
+            .args(["init"])
+            .current_dir(temp_dir.path())
+            .status();
+
+        // Only run test if git is available
+        if status.is_err() || !status.unwrap().success() {
+            return; // Skip test if git is not available
+        }
+
+        // Change to the git repo directory
+        let original_dir = std::env::current_dir().expect("Failed to get current dir");
+        std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
+
+        // get_repo_root should find the repo root
+        let result = get_repo_root();
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
+
+        assert!(result.is_ok(), "get_repo_root should succeed");
+        let root = result.unwrap();
+        assert!(
+            root.is_some(),
+            "get_repo_root should return Some path when in git repo"
+        );
+        assert_eq!(
+            root.unwrap(),
+            temp_dir.path(),
+            "get_repo_root should return the correct repo root"
+        );
+    }
+
+    #[test]
+    fn test_get_repo_root_finds_repo_from_subdirectory() {
+        // Create a temp git repo
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+        // Initialize git repo
+        let status = Command::new("git")
+            .args(["init"])
+            .current_dir(temp_dir.path())
+            .status();
+
+        // Only run test if git is available
+        if status.is_err() || !status.unwrap().success() {
+            return; // Skip test if git is not available
+        }
+
+        // Create a subdirectory
+        let subdir = temp_dir.path().join("subdir");
+        fs::create_dir(&subdir).expect("Failed to create subdir");
+
+        // Change to the subdirectory
+        let original_dir = std::env::current_dir().expect("Failed to get current dir");
+        std::env::set_current_dir(&subdir).expect("Failed to change dir");
+
+        // get_repo_root should find the repo root from subdir
+        let result = get_repo_root();
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
+
+        assert!(result.is_ok(), "get_repo_root should succeed");
+        let root = result.unwrap();
+        assert!(
+            root.is_some(),
+            "get_repo_root should return Some path when in git repo"
+        );
+        assert_eq!(
+            root.unwrap(),
+            temp_dir.path(),
+            "get_repo_root should return the repo root even from subdirectory"
         );
     }
 }

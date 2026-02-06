@@ -273,11 +273,27 @@ fn default_contributor_decay() -> f64 {
     0.01
 }
 
+/// Pre-commit profile runtime settings.
+///
+/// This struct contains both the modified configuration and runtime flags
+/// that should be applied when using the pre-commit profile.
+#[derive(Debug, Clone)]
+pub struct PreCommitSettings {
+    /// The modified configuration with profile settings applied.
+    pub config: RaffConfig,
+    /// Run only fast rules (statement-count, coupling).
+    pub fast: bool,
+    /// Analyze only git-staged files.
+    pub staged: bool,
+    /// Minimal output (summary line only).
+    pub quiet: bool,
+}
+
 /// Apply the pre-commit profile configuration to a merged config.
 ///
 /// This function applies the pre-commit profile settings from the configuration
-/// to create a modified config with profile defaults. CLI flags can still
-/// override these values.
+/// to create a modified config with profile defaults, and returns runtime flags
+/// that should be applied. CLI flags can still override these values.
 ///
 /// # Arguments
 ///
@@ -285,8 +301,9 @@ fn default_contributor_decay() -> f64 {
 ///
 /// # Returns
 ///
-/// A modified `RaffConfig` with pre-commit profile settings applied.
-/// If no pre-commit profile is defined, returns the config unchanged.
+/// A `PreCommitSettings` struct containing the modified config and runtime flags.
+/// If no pre-commit profile is defined, returns the config unchanged with all
+/// runtime flags set to false.
 ///
 /// # Examples
 ///
@@ -294,13 +311,20 @@ fn default_contributor_decay() -> f64 {
 /// use raff_core::config::{RaffConfig, apply_pre_commit_profile};
 ///
 /// let config = RaffConfig::default();
-/// let modified = apply_pre_commit_profile(&config);
+/// let settings = apply_pre_commit_profile(&config);
 /// ```
 #[must_use]
-pub fn apply_pre_commit_profile(config: &RaffConfig) -> RaffConfig {
+pub fn apply_pre_commit_profile(config: &RaffConfig) -> PreCommitSettings {
     let pc = match &config.profile.pre_commit {
         Some(p) => p,
-        None => return config.clone(),
+        None => {
+            return PreCommitSettings {
+                config: config.clone(),
+                fast: false,
+                staged: false,
+                quiet: false,
+            }
+        }
     };
 
     let mut result = config.clone();
@@ -310,13 +334,13 @@ pub fn apply_pre_commit_profile(config: &RaffConfig) -> RaffConfig {
         result.statement_count.threshold = threshold;
     }
 
-    // Note: fast, staged, and quiet are CLI-only flags that are applied
-    // in the CLI layer, not here in the config. The profile values are
-    // available for inspection but don't modify the config directly.
-    // This is by design - these flags control runtime behavior, not
-    // configuration state.
-
-    result
+    // Return profile settings for runtime behavior
+    PreCommitSettings {
+        config: result,
+        fast: pc.fast.unwrap_or(false),
+        staged: pc.staged.unwrap_or(false),
+        quiet: pc.quiet.unwrap_or(false),
+    }
 }
 
 /// Load configuration from a specific file path.
@@ -347,6 +371,8 @@ pub fn load_config_from_path(path: &Path) -> Result<Option<RaffConfig>> {
 /// Searches for configuration files in the current directory and parent directories,
 /// using the default config file names: `Raff.toml`, `.raff.toml`, `raff.toml`.
 ///
+/// Also checks for `.raff/raff.toml` at the git repository root.
+///
 /// # Returns
 ///
 /// Returns `Some(RaffConfig)` if a config file is found and can be parsed.
@@ -367,6 +393,14 @@ pub fn discover_and_load_config() -> Result<Option<(PathBuf, RaffConfig)>> {
         if !current_dir.pop() {
             // Reached the root without finding a config file
             break;
+        }
+    }
+
+    // Try to find .raff/raff.toml at git repository root
+    if let Ok(Some(repo_root)) = crate::git_utils::get_repo_root() {
+        let raff_config_path = repo_root.join(".raff").join("raff.toml");
+        if let Some(config) = load_config_from_path(&raff_config_path)? {
+            return Ok(Some((raff_config_path, config)));
         }
     }
 
@@ -785,6 +819,7 @@ pub fn merge_all_args(cli_args: &crate::cli::AllArgs, config: &RaffConfig) -> cr
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::process::Command;
     use tempfile::NamedTempFile;
     use tempfile::TempDir;
 
@@ -1651,8 +1686,17 @@ sc_threshold = 15
         let result = apply_pre_commit_profile(&config);
 
         assert_eq!(
-            result.statement_count.threshold, original_threshold,
+            result.config.statement_count.threshold, original_threshold,
             "threshold should remain unchanged when no profile is set"
+        );
+        assert!(!result.fast, "fast should be false when no profile is set");
+        assert!(
+            !result.staged,
+            "staged should be false when no profile is set"
+        );
+        assert!(
+            !result.quiet,
+            "quiet should be false when no profile is set"
         );
     }
 
@@ -1670,9 +1714,12 @@ sc_threshold = 15
         let result = apply_pre_commit_profile(&config);
 
         assert_eq!(
-            result.statement_count.threshold, 20,
+            result.config.statement_count.threshold, 20,
             "threshold should be updated to profile value"
         );
+        assert!(result.fast, "fast should be true");
+        assert!(result.staged, "staged should be true");
+        assert!(result.quiet, "quiet should be true");
     }
 
     #[test]
@@ -1691,17 +1738,20 @@ sc_threshold = 15
         let result = apply_pre_commit_profile(&config);
 
         assert_eq!(
-            result.statement_count.threshold, 15,
+            result.config.statement_count.threshold, 15,
             "sc_threshold should be applied"
         );
         assert_eq!(
-            result.volatility.alpha, 0.05,
+            result.config.volatility.alpha, 0.05,
             "volatility alpha should be preserved"
         );
         assert!(
-            result.general.verbose,
+            result.config.general.verbose,
             "general verbose should be preserved"
         );
+        assert!(result.fast, "fast should be true");
+        assert!(result.staged, "staged should be true");
+        assert!(result.quiet, "quiet should be true");
     }
 
     #[test]
@@ -1718,8 +1768,17 @@ sc_threshold = 15
         let result = apply_pre_commit_profile(&config);
 
         assert_eq!(
-            result.statement_count.threshold, 30,
+            result.config.statement_count.threshold, 30,
             "only sc_threshold should be applied"
+        );
+        assert!(!result.fast, "fast should be false when not set in profile");
+        assert!(
+            !result.staged,
+            "staged should be false when not set in profile"
+        );
+        assert!(
+            !result.quiet,
+            "quiet should be false when not set in profile"
         );
     }
 
@@ -1757,8 +1816,254 @@ sc_threshold = 15
         let result = apply_pre_commit_profile(&config);
 
         assert_eq!(
-            result.statement_count.threshold, 0,
+            result.config.statement_count.threshold, 0,
             "zero threshold should be applied"
+        );
+        assert!(result.fast, "fast should be true");
+        assert!(result.staged, "staged should be true");
+        assert!(result.quiet, "quiet should be true");
+    }
+
+    #[test]
+    fn test_discover_and_load_config_finds_raff_directory_config() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+        // Initialize git repo
+        let status = Command::new("git")
+            .args(["init"])
+            .current_dir(temp_dir.path())
+            .status();
+
+        // Only run test if git is available
+        if status.is_err() || !status.unwrap().success() {
+            return; // Skip test if git is not available
+        }
+
+        // Create .raff directory and config file
+        let raff_dir = temp_dir.path().join(".raff");
+        fs::create_dir(&raff_dir).expect("Failed to create .raff directory");
+
+        let raff_config_path = raff_dir.join("raff.toml");
+        let content = r#"
+[general]
+verbose = true
+
+[statement_count]
+threshold = 15
+"#;
+        fs::write(&raff_config_path, content).expect("Failed to write config file");
+
+        // Use a known valid path since current_dir() might fail if previous test deleted its temp dir
+        let fallback_path = std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                tempfile::TempDir::new()
+                    .ok()
+                    .map(|d| d.path().to_path_buf())
+            })
+            .expect("Failed to get fallback path");
+        let original_path = std::env::current_dir().unwrap_or(fallback_path.clone());
+
+        std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
+
+        let result = discover_and_load_config();
+
+        // Restore directory - use fallback if original path no longer exists
+        let _ = std::env::set_current_dir(&original_path)
+            .or_else(|_| std::env::set_current_dir(&fallback_path));
+
+        assert!(result.is_ok(), "discover_and_load_config should succeed");
+
+        let (path, config) = result.unwrap().expect("should find config file");
+        // Check that the config was found at .raff/raff.toml
+        assert!(
+            path.ends_with(".raff/raff.toml") || path.ends_with(".raff/raff.toml"),
+            "should find config at .raff/raff.toml, got: {:?}",
+            path
+        );
+        assert!(config.general.verbose, "verbose should be true");
+        assert_eq!(
+            config.statement_count.threshold, 15,
+            "threshold should be 15"
+        );
+    }
+
+    #[test]
+    fn test_discover_and_load_config_prioritizes_local_config_over_raff_directory() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+        // Initialize git repo
+        let status = Command::new("git")
+            .args(["init"])
+            .current_dir(temp_dir.path())
+            .status();
+
+        // Only run test if git is available
+        if status.is_err() || !status.unwrap().success() {
+            return; // Skip test if git is not available
+        }
+
+        // Create local Raff.toml
+        let local_config_path = temp_dir.path().join("Raff.toml");
+        let local_content = r#"
+[general]
+verbose = false
+"#;
+        fs::write(&local_config_path, local_content).expect("Failed to write local config");
+
+        // Create .raff directory config (should not be used since local config exists)
+        let raff_dir = temp_dir.path().join(".raff");
+        fs::create_dir(&raff_dir).expect("Failed to create .raff directory");
+
+        let raff_config_path = raff_dir.join("raff.toml");
+        let raff_content = r#"
+[general]
+verbose = true
+
+[statement_count]
+threshold = 50
+"#;
+        fs::write(&raff_config_path, raff_content).expect("Failed to write .raff config");
+
+        // Use a known valid path
+        let fallback_path = std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                tempfile::TempDir::new()
+                    .ok()
+                    .map(|d| d.path().to_path_buf())
+            })
+            .expect("Failed to get fallback path");
+        let original_path = std::env::current_dir().unwrap_or(fallback_path.clone());
+
+        std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
+
+        let result = discover_and_load_config();
+
+        // Restore directory
+        let _ = std::env::set_current_dir(&original_path)
+            .or_else(|_| std::env::set_current_dir(&fallback_path));
+
+        assert!(result.is_ok(), "discover_and_load_config should succeed");
+
+        let (path, config) = result.unwrap().expect("should find config file");
+        // Local config should take priority
+        assert!(
+            path.ends_with("Raff.toml") || path.ends_with("Raff.toml"),
+            "should find local config, got: {:?}",
+            path
+        );
+        assert!(
+            !config.general.verbose,
+            "should use local config (verbose=false)"
+        );
+    }
+
+    #[test]
+    fn test_discover_and_load_config_finds_raff_directory_from_subdirectory() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+        // Initialize git repo
+        let status = Command::new("git")
+            .args(["init"])
+            .current_dir(temp_dir.path())
+            .status();
+
+        // Only run test if git is available
+        if status.is_err() || !status.unwrap().success() {
+            return; // Skip test if git is not available
+        }
+
+        // Create .raff directory and config file at repo root
+        let raff_dir = temp_dir.path().join(".raff");
+        fs::create_dir(&raff_dir).expect("Failed to create .raff directory");
+
+        let raff_config_path = raff_dir.join("raff.toml");
+        let content = r#"
+[coupling]
+granularity = "module"
+"#;
+        fs::write(&raff_config_path, content).expect("Failed to write config file");
+
+        // Create a subdirectory
+        let subdir = temp_dir.path().join("nested/subdir");
+        fs::create_dir_all(&subdir).expect("Failed to create subdir");
+
+        // Use a known valid path
+        let fallback_path = std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                tempfile::TempDir::new()
+                    .ok()
+                    .map(|d| d.path().to_path_buf())
+            })
+            .expect("Failed to get fallback path");
+        let original_path = std::env::current_dir().unwrap_or(fallback_path.clone());
+
+        std::env::set_current_dir(&subdir).expect("Failed to change dir");
+
+        let result = discover_and_load_config();
+
+        // Restore directory
+        let _ = std::env::set_current_dir(&original_path)
+            .or_else(|_| std::env::set_current_dir(&fallback_path));
+
+        assert!(result.is_ok(), "discover_and_load_config should succeed");
+
+        let (_path, config) = result.unwrap().expect("should find config file");
+        assert_eq!(
+            config.coupling.granularity.as_ref().unwrap(),
+            "module",
+            "should load .raff/raff.toml from git root when in subdirectory"
+        );
+    }
+
+    #[test]
+    fn test_discover_and_load_config_returns_none_when_only_raff_dir_exists_but_no_config() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+        // Initialize git repo
+        let status = Command::new("git")
+            .args(["init"])
+            .current_dir(temp_dir.path())
+            .status();
+
+        // Only run test if git is available
+        if status.is_err() || !status.unwrap().success() {
+            return; // Skip test if git is not available
+        }
+
+        // Create .raff directory but no config file
+        let raff_dir = temp_dir.path().join(".raff");
+        fs::create_dir(&raff_dir).expect("Failed to create .raff directory");
+
+        // Use a known valid path
+        let fallback_path = std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                tempfile::TempDir::new()
+                    .ok()
+                    .map(|d| d.path().to_path_buf())
+            })
+            .expect("Failed to get fallback path");
+        let original_path = std::env::current_dir().unwrap_or(fallback_path.clone());
+
+        std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
+
+        let result = discover_and_load_config();
+
+        // Restore directory
+        let _ = std::env::set_current_dir(&original_path)
+            .or_else(|_| std::env::set_current_dir(&fallback_path));
+
+        assert!(result.is_ok(), "discover_and_load_config should succeed");
+        assert!(
+            result.unwrap().is_none(),
+            "should return None when .raff directory exists but no config file"
         );
     }
 }

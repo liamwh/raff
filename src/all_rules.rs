@@ -22,6 +22,8 @@
 //!     path: PathBuf::from("./src"),
 //!     output: AllOutputFormat::Json,
 //!     fast: false,
+//!     quiet: false,
+//!     staged: false,
 //!     // .. other fields
 //!     sc_threshold: 10,
 //!     vol_alpha: 0.01,

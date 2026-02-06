@@ -64,18 +64,29 @@ fn main() -> Result<()> {
     }
 
     // Apply profile if requested via --profile flag
-    let config = if cli_args.profile.as_deref() == Some("pre-commit") {
-        tracing::info!("Applying pre-commit profile configuration");
-        apply_pre_commit_profile(&hierarchical_result.merged)
-    } else {
-        hierarchical_result.merged.clone()
-    };
+    let (config, profile_fast, profile_staged, profile_quiet) =
+        if cli_args.profile.as_deref() == Some("pre-commit") {
+            tracing::info!("Applying pre-commit profile configuration");
+            let settings = apply_pre_commit_profile(&hierarchical_result.merged);
+            (
+                settings.config,
+                settings.fast,
+                settings.staged,
+                settings.quiet,
+            )
+        } else {
+            (hierarchical_result.merged.clone(), false, false, false)
+        };
 
     let run_result = match cli_args.command {
-        Commands::StatementCount(args) => {
+        Commands::StatementCount(mut args) => {
+            // Apply profile staged setting
+            if profile_staged {
+                args.staged = true;
+            }
             let mut merged_args = merge_statement_count_args(&args, &config);
-            // Propagate global staged flag
-            merged_args.staged = cli_args.staged || args.staged;
+            // Propagate global staged flag and profile staged setting
+            merged_args.staged = cli_args.staged || profile_staged || args.staged;
             let rule = StatementCountRule::new();
             tracing::info!("Running StatementCount rule with args: {:?}", merged_args);
             rule.run(&merged_args)
@@ -86,10 +97,14 @@ fn main() -> Result<()> {
             tracing::info!("Running Volatility rule with args: {:?}", merged_args);
             rule.run(&merged_args)
         }
-        Commands::Coupling(args) => {
+        Commands::Coupling(mut args) => {
+            // Apply profile staged setting
+            if profile_staged {
+                args.staged = true;
+            }
             let mut merged_args = merge_coupling_args(&args, &config);
-            // Propagate global staged flag
-            merged_args.staged = cli_args.staged || args.staged;
+            // Propagate global staged flag and profile staged setting
+            merged_args.staged = cli_args.staged || profile_staged || args.staged;
             let rule = CouplingRule::new();
             tracing::info!("Running Coupling rule with args: {:?}", merged_args);
             rule.run(&merged_args)
@@ -100,10 +115,20 @@ fn main() -> Result<()> {
             tracing::info!("Running RustCodeAnalysis rule with args: {:?}", merged_args);
             rule.run(&merged_args)
         }
-        Commands::All(args) => {
+        Commands::All(mut args) => {
+            // Apply profile settings if pre-commit profile is active
+            if profile_fast {
+                args.fast = true;
+            }
+            if profile_quiet {
+                args.quiet = true;
+            }
+            if profile_staged {
+                args.staged = true;
+            }
             let mut merged_args = merge_all_args(&args, &config);
-            // Propagate global staged flag
-            merged_args.staged = cli_args.staged || args.staged;
+            // Propagate global staged flag and profile staged setting
+            merged_args.staged = cli_args.staged || profile_staged || args.staged;
             tracing::info!("Running all rules with args: {:?}", merged_args);
             all_rules::run_all(&merged_args)
         }

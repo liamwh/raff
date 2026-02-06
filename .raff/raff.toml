@@ -1,0 +1,33 @@
+# .raff/raff.toml - Configuration for raff architecture analysis
+
+[general]
+# Default analysis path for this repo (relative to repo root)
+path = "src"
+
+# Statement Count Rule Configuration
+[statement_count]
+# Components exceeding 15% of total statements will be flagged
+threshold = 15
+
+# Coupling Rule Configuration
+[coupling]
+# Since raff is a single crate, show only module-level coupling
+granularity = "module"
+
+# Volatility Rule Configuration (skipped in fast mode)
+[volatility]
+# Weighting factor: 0.01 = focus on commit touch count, 0.99 = focus on lines changed
+alpha = 0.01
+# Skip merge commits in volatility analysis
+skip_merges = true
+
+# Pre-commit profile for use with pre-commit hooks
+[profile.pre_commit]
+# Run only fast rules (statement-count, coupling)
+fast = true
+# Analyze only git-staged files
+staged = true
+# Minimal output (summary line only)
+quiet = true
+# More lenient threshold for pre-commit (25% vs 15% default)
+sc_threshold = 25
