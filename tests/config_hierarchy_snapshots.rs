@@ -6,7 +6,7 @@
 //! Note: These tests modify the current directory and environment variables,
 //! so they run serially using the `serial_test` crate.
 
-use raff_core::config_hierarchy::{load_hierarchical_config, ConfigSourceType, HierarchicalConfig};
+use raff_core::config_hierarchy::{ConfigSourceType, HierarchicalConfig, load_hierarchical_config};
 use serial_test::serial;
 use std::fs;
 use std::path::Path;
@@ -136,7 +136,7 @@ alpha = 0.02
     );
 
     // Set XDG_CONFIG_HOME
-    std::env::set_var("XDG_CONFIG_HOME", xdg_config);
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg_config) };
 
     // Create repo-local config
     let _repo_local_config = create_temp_config_file(
@@ -176,9 +176,9 @@ granularity = "module"
 
     // Restore original environment
     if let Some(xdg) = original_xdg {
-        std::env::set_var("XDG_CONFIG_HOME", xdg);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
     } else {
-        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     let hierarchical = result.expect("load_hierarchical_config should succeed");
@@ -237,7 +237,7 @@ alpha = 0.015
     );
 
     // Set XDG_CONFIG_HOME
-    std::env::set_var("XDG_CONFIG_HOME", xdg_config);
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg_config) };
 
     // Create repo-local config (no traditional config)
     let _repo_local_config = create_temp_config_file(
@@ -271,9 +271,9 @@ threshold = 100
 
     // Restore original environment
     if let Some(xdg) = original_xdg {
-        std::env::set_var("XDG_CONFIG_HOME", xdg);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
     } else {
-        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     let hierarchical = result.expect("load_hierarchical_config should succeed");
@@ -287,14 +287,18 @@ threshold = 100
     );
 
     // Verify user and repo-local sources are present
-    assert!(hierarchical
-        .sources
-        .iter()
-        .any(|s| matches!(s.source_type, ConfigSourceType::User)));
-    assert!(hierarchical
-        .sources
-        .iter()
-        .any(|s| matches!(s.source_type, ConfigSourceType::RepoLocal)));
+    assert!(
+        hierarchical
+            .sources
+            .iter()
+            .any(|s| matches!(s.source_type, ConfigSourceType::User))
+    );
+    assert!(
+        hierarchical
+            .sources
+            .iter()
+            .any(|s| matches!(s.source_type, ConfigSourceType::RepoLocal))
+    );
 
     // Snapshot the partial hierarchical configuration
     let formatted = format_hierarchical_config(&hierarchical);
@@ -318,7 +322,7 @@ fn snapshot_cli_explicit_path_override() {
 threshold = 100
 "#,
     );
-    std::env::set_var("XDG_CONFIG_HOME", xdg_config);
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg_config) };
 
     // Create repo-local config (should also be ignored)
     let _repo_local_config = create_temp_config_file(
@@ -361,9 +365,9 @@ granularity = "crate"
 
     // Restore original environment
     if let Some(xdg) = original_xdg {
-        std::env::set_var("XDG_CONFIG_HOME", xdg);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
     } else {
-        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     let hierarchical = result.expect("load_hierarchical_config should succeed");
@@ -400,7 +404,7 @@ fn snapshot_default_config_when_no_user_or_repo_config() {
     // Set XDG_CONFIG_HOME to a directory with no config
     let xdg_config = temp_dir.path().join("xdg-config");
     fs::create_dir_all(&xdg_config).expect("Failed to create xdg config dir");
-    std::env::set_var("XDG_CONFIG_HOME", xdg_config);
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg_config) };
 
     // Initialize a git repo in a different directory so repo-local config won't be found
     let git_temp_dir = TempDir::new().expect("Failed to create git temp dir");
@@ -430,9 +434,9 @@ alpha = 0.01
 
     // Restore original environment
     if let Some(xdg) = original_xdg {
-        std::env::set_var("XDG_CONFIG_HOME", xdg);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
     } else {
-        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     let hierarchical = result.expect("load_hierarchical_config should succeed");

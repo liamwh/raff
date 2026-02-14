@@ -50,12 +50,12 @@
 //! - An error occurs during AST parsing
 
 use bincode;
-use maud::html;
 use maud::Markup;
+use maud::html;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, io::Write, path::PathBuf};
-use syn::visit::Visit;
 use syn::File as SynFile;
+use syn::visit::Visit;
 use tracing::instrument;
 
 use crate::cache::{CacheEntry, CacheKey, CacheManager};
@@ -360,10 +360,19 @@ impl StatementCountRule {
 
     pub fn render_statement_count_html_body(&self, data: &StatementCountData) -> Result<Markup> {
         let explanations_data = [
-            ("Component", "Name of the top-level component (e.g., directory under src/, or crate name)."),
+            (
+                "Component",
+                "Name of the top-level component (e.g., directory under src/, or crate name).",
+            ),
             ("File Count", "Number of .rs files within this component."),
-            ("Statement Count", "Total number of Rust statements counted in this component."),
-            ("Percentage", "This component's statement count as a percentage of the grand total. Cells are colored red if this exceeds the threshold."),
+            (
+                "Statement Count",
+                "Total number of Rust statements counted in this component.",
+            ),
+            (
+                "Percentage",
+                "This component's statement count as a percentage of the grand total. Cells are colored red if this exceeds the threshold.",
+            ),
         ];
         let explanations_markup = html_utils::render_metric_explanation_list(&explanations_data);
 

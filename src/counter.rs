@@ -17,7 +17,7 @@
 //!
 //! The `visit_file` method requires the `Visit` trait from `syn` to be in scope.
 
-use syn::{visit::Visit, File as SynFile, Stmt};
+use syn::{File as SynFile, Stmt, visit::Visit};
 
 /// A simple visitor that counts every `syn::Stmt` node in an AST.
 pub struct StmtCounter {

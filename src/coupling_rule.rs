@@ -88,7 +88,7 @@ use crate::error::{RaffError, Result};
 use crate::html_utils;
 use crate::rule::Rule;
 use crate::table_utils::get_default_table_format;
-use maud::{html, Markup};
+use maud::{Markup, html};
 use prettytable::{Cell, Row, Table};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -96,7 +96,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use syn::{visit::Visit, ExprPath, Item, ItemMod, ItemUse, PatType};
+use syn::{ExprPath, Item, ItemMod, ItemUse, PatType, visit::Visit};
 use walkdir::WalkDir;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -481,7 +481,9 @@ impl CouplingRule {
                 }
             }
         } else {
-            eprintln!("Warning: 'resolve' graph not found in cargo metadata. Crate coupling might be inaccurate using fallback.");
+            eprintln!(
+                "Warning: 'resolve' graph not found in cargo metadata. Crate coupling might be inaccurate using fallback."
+            );
             let workspace_package_names_to_ids: HashMap<String, String> = workspace_packages_map
                 .values()
                 .map(|p| (p.name.clone(), p.id.clone()))
@@ -489,8 +491,8 @@ impl CouplingRule {
             for (origin_pkg_id_str, origin_pkg_data) in &workspace_packages_map {
                 let origin_pkg_name = &origin_pkg_data.name;
                 for dep in &origin_pkg_data.dependencies {
-                    if let Some(target_pkg_id_str) = workspace_package_names_to_ids.get(&dep.name) {
-                        if origin_pkg_id_str != target_pkg_id_str {
+                    if let Some(target_pkg_id_str) = workspace_package_names_to_ids.get(&dep.name)
+                        && origin_pkg_id_str != target_pkg_id_str {
                             let target_pkg_name = workspace_packages_map
                                 .values()
                                 .find(|p| &p.id == target_pkg_id_str)
@@ -508,7 +510,6 @@ impl CouplingRule {
                                 coupling_data.dependencies.insert(target_pkg_name.clone());
                             }
                         }
-                    }
                 }
             }
         }
@@ -577,7 +578,12 @@ impl CouplingRule {
                     }
                 }
                 Err(err) => {
-                    eprintln!("Warning: Failed to parse module {} at {}: {}. Skipping for module analysis.", current_module_path_str, source_file_path.display(), err);
+                    eprintln!(
+                        "Warning: Failed to parse module {} at {}: {}. Skipping for module analysis.",
+                        current_module_path_str,
+                        source_file_path.display(),
+                        err
+                    );
                 }
             }
         }
@@ -671,11 +677,23 @@ impl CouplingRule {
         let granularity = &report.granularity;
         let analysis_path = &report.analysis_path;
         let mut explanations = vec![
-            ("Ce (Efferent Coupling)", "The number of other components that this component depends on."),
-            ("Ca (Afferent Coupling)", "The number of other components that depend on this component."),
-            ("I (Instability)", "Ce / (Ce + Ca). Ranges from 0 (completely stable) to 1 (completely unstable)."),
+            (
+                "Ce (Efferent Coupling)",
+                "The number of other components that this component depends on.",
+            ),
+            (
+                "Ca (Afferent Coupling)",
+                "The number of other components that depend on this component.",
+            ),
+            (
+                "I (Instability)",
+                "Ce / (Ce + Ca). Ranges from 0 (completely stable) to 1 (completely unstable).",
+            ),
             ("A (Abstractness)", "Not implemented in this version."),
-            ("D (Distance)", "The perpendicular distance from the main sequence. |A + I - 1|. A value of 0 is ideal, 1 is the furthest away."),
+            (
+                "D (Distance)",
+                "The perpendicular distance from the main sequence. |A + I - 1|. A value of 0 is ideal, 1 is the furthest away.",
+            ),
         ];
         if matches!(
             granularity,
@@ -991,8 +1009,8 @@ impl CouplingRule {
                 && file_name != "mod.rs"
                 && file_name != "lib.rs"
                 && file_name != "main.rs"
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
             {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                     let mod_name = stem.to_string();
                     let mod_path_str = if base_mod_path.to_string_lossy() == "crate" {
                         format!("crate::{mod_name}")
@@ -1003,7 +1021,6 @@ impl CouplingRule {
                         module_map.insert(mod_path_str.clone(), path.to_path_buf());
                         self.discover_inline_modules(path, &mod_path_str, module_map)?;
                     }
-                }
             }
         }
         Ok(())
@@ -1023,20 +1040,24 @@ impl CouplingRule {
         match syn::parse_file(&content) {
             Ok(ast) => {
                 for item in ast.items {
-                    if let Item::Mod(item_mod) = item {
-                        if item_mod.content.is_some() {
+                    if let Item::Mod(item_mod) = item
+                        && item_mod.content.is_some()
+                    {
                             let mod_name = item_mod.ident.to_string();
                             let _inline_mod_path_str = if base_module_path_str == "crate" {
                                 format!("crate::{mod_name}")
                             } else {
                                 format!("{base_module_path_str}::{mod_name}")
                             };
-                        }
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Warning: Failed to parse {} for inline modules: {}. Skipping inline scan for this file.", file_path.display(), e);
+                eprintln!(
+                    "Warning: Failed to parse {} for inline modules: {}. Skipping inline scan for this file.",
+                    file_path.display(),
+                    e
+                );
             }
         }
         Ok(())
@@ -1077,11 +1098,11 @@ impl<'a> Visit<'a> for ModuleDependencyVisitor<'a> {
         syn::visit::visit_expr_path(self, expr);
     }
     fn visit_pat_type(&mut self, pt: &'a PatType) {
-        if let syn::Type::Path(type_path) = &*pt.ty {
-            if let Some(resolved_path) = self.resolve_path(&type_path.path) {
+        if let syn::Type::Path(type_path) = &*pt.ty
+            && let Some(resolved_path) = self.resolve_path(&type_path.path)
+        {
                 self.dependencies.insert(resolved_path);
             }
-        }
         syn::visit::visit_pat_type(self, pt);
     }
 }

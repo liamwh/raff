@@ -87,8 +87,8 @@ use crate::error::{RaffError, Result};
 use crate::rule::Rule;
 use chrono::{DateTime, Utc};
 use git2::{Commit, Repository};
-use maud::{html, Markup};
-use prettytable::{row, Table};
+use maud::{Markup, html};
+use prettytable::{Table, row};
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{CiOutputFormat, ContributorReportArgs, ContributorReportOutputFormat};
@@ -433,12 +433,30 @@ impl ContributorReportRule {
 
     fn render_explanation(&self) -> Markup {
         let explanations = vec![
-            ("Author", "The name of the contributor, as extracted from the Git commit logs."),
-            ("Commit Count", "The total number of commits made by the contributor."),
-            ("Lines Added", "The total number of lines of code added by the contributor. This metric is weighted positively in the score calculation."),
-            ("Lines Deleted", "The total number of lines of code deleted by the contributor. This is considered a positive contribution (e.g., refactoring, removing dead code) and is weighted positively."),
-            ("Files Touched", "The total number of unique files modified by the contributor."),
-            ("Score", "A calculated metric representing the overall contribution. It is a weighted sum of commits, lines added, lines deleted, and files touched, with an exponential decay factor applied to give more weight to recent contributions. The formula is: `Σ((1 + churn + files_touched) * e^(-decay * days_since_commit))` for each commit."),
+            (
+                "Author",
+                "The name of the contributor, as extracted from the Git commit logs.",
+            ),
+            (
+                "Commit Count",
+                "The total number of commits made by the contributor.",
+            ),
+            (
+                "Lines Added",
+                "The total number of lines of code added by the contributor. This metric is weighted positively in the score calculation.",
+            ),
+            (
+                "Lines Deleted",
+                "The total number of lines of code deleted by the contributor. This is considered a positive contribution (e.g., refactoring, removing dead code) and is weighted positively.",
+            ),
+            (
+                "Files Touched",
+                "The total number of unique files modified by the contributor.",
+            ),
+            (
+                "Score",
+                "A calculated metric representing the overall contribution. It is a weighted sum of commits, lines added, lines deleted, and files touched, with an exponential decay factor applied to give more weight to recent contributions. The formula is: `Σ((1 + churn + files_touched) * e^(-decay * days_since_commit))` for each commit.",
+            ),
         ];
         html_utils::render_metric_explanation_list(&explanations)
     }

@@ -78,10 +78,10 @@
 use bincode;
 use chrono::{DateTime, NaiveDate, TimeZone, Utc}; // For parsing --since date
 use git2::{DiffOptions, Repository, Sort, TreeWalkMode, TreeWalkResult};
-use maud::{html, Markup};
-use prettytable::{format, Cell, Row, Table}; // Added for table output
+use maud::{Markup, html};
+use prettytable::{Cell, Row, Table, format}; // Added for table output
 use serde::{Deserialize, Serialize}; // Added for custom output struct
-                                     // Ensure serde_json is explicitly imported
+// Ensure serde_json is explicitly imported
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write}; // For reading files line by line in LoC calculation and for writing output files
@@ -436,7 +436,9 @@ impl VolatilityRule {
         println!("- Added: Total lines of code added to this crate.");
         println!("- Deleted: Total lines of code deleted from this crate.");
         if normalize {
-            println!("- Total LoC: Total non-blank lines of Rust code in the crate (used for normalization).");
+            println!(
+                "- Total LoC: Total non-blank lines of Rust code in the crate (used for normalization)."
+            );
         }
         println!(
             "- Raw Score: Calculated as 'Touches + (alpha * (Added + Deleted))'. Alpha = {alpha:.4}. A higher score indicates more recent change activity (commits and/or lines changed)."
@@ -610,12 +612,30 @@ impl VolatilityRule {
         alpha: f64,
     ) -> Result<Markup> {
         let explanations_data = [
-            ("Crate Name", "The name of the crate as defined in its Cargo.toml."),
-            ("Birth Date", "The date of the first commit where this crate's Cargo.toml appeared. 'N/A' if not found in history."),
-            ("Commit Touches", "The number of commits (since the specified date) that modified any file within this crate."),
-            ("Lines Added", "Total number of lines added to .rs files in this crate."),
-            ("Lines Deleted", "Total number of lines deleted from .rs files in this crate."),
-            ("Raw Score", "A combined metric calculated as: (Lines Added + Lines Deleted) + α * (Commit Touches). A higher score indicates higher churn/activity."),
+            (
+                "Crate Name",
+                "The name of the crate as defined in its Cargo.toml.",
+            ),
+            (
+                "Birth Date",
+                "The date of the first commit where this crate's Cargo.toml appeared. 'N/A' if not found in history.",
+            ),
+            (
+                "Commit Touches",
+                "The number of commits (since the specified date) that modified any file within this crate.",
+            ),
+            (
+                "Lines Added",
+                "Total number of lines added to .rs files in this crate.",
+            ),
+            (
+                "Lines Deleted",
+                "Total number of lines deleted from .rs files in this crate.",
+            ),
+            (
+                "Raw Score",
+                "A combined metric calculated as: (Lines Added + Lines Deleted) + α * (Commit Touches). A higher score indicates higher churn/activity.",
+            ),
         ];
         let mut explanations_data_vec = explanations_data.to_vec();
 
@@ -1066,10 +1086,10 @@ impl VolatilityRule {
             }
             stats.raw_score = (stats.lines_added + stats.lines_deleted) as f64
                 + args.alpha * stats.commit_touch_count as f64;
-            if let Some(loc) = stats.total_loc {
-                if loc > 0 {
-                    stats.normalized_score = Some(stats.raw_score / loc as f64);
-                }
+            if let Some(loc) = stats.total_loc
+                && loc > 0
+            {
+                stats.normalized_score = Some(stats.raw_score / loc as f64);
             }
         }
 

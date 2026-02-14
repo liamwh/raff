@@ -6,7 +6,7 @@
 //!
 //! Run `cargo insta review` to review changes after modifying the code.
 
-use raff_core::ci_report::{to_sarif, Finding, Location, Severity};
+use raff_core::ci_report::{Finding, Location, Severity, to_sarif};
 
 #[test]
 fn test_sarif_empty() {

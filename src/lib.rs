@@ -104,17 +104,17 @@ pub use crate::volatility_rule::VolatilityRule;
 
 // Config exports
 pub use crate::config::{
+    ContributorReportConfig, CouplingConfig, GeneralConfig, PreCommitProfile, PreCommitSettings,
+    ProfileConfig, RaffConfig, RustCodeAnalysisConfig, StatementCountConfig, VolatilityConfig,
     apply_pre_commit_profile, load_config, load_config_from_path, merge_all_args,
     merge_contributor_report_args, merge_coupling_args, merge_rust_code_analysis_args,
-    merge_statement_count_args, merge_volatility_args, ContributorReportConfig, CouplingConfig,
-    GeneralConfig, PreCommitProfile, PreCommitSettings, ProfileConfig, RaffConfig,
-    RustCodeAnalysisConfig, StatementCountConfig, VolatilityConfig,
+    merge_statement_count_args, merge_volatility_args,
 };
 
 // Config hierarchy exports
 pub use crate::config_hierarchy::{
-    find_git_repo_root, get_repo_local_config_path, get_user_config_path, load_hierarchical_config,
-    merge_configs, ConfigSource, ConfigSourceType, HierarchicalConfig, Mergeable,
+    ConfigSource, ConfigSourceType, HierarchicalConfig, Mergeable, find_git_repo_root,
+    get_repo_local_config_path, get_user_config_path, load_hierarchical_config, merge_configs,
 };
 
 // Cache exports
@@ -133,4 +133,4 @@ pub use crate::cli_report::render_summary_line;
 pub use crate::rule::Rule;
 
 // CI report exports
-pub use crate::ci_report::{to_junit, to_sarif, Finding, Location, Severity, ToFindings};
+pub use crate::ci_report::{Finding, Location, Severity, ToFindings, to_junit, to_sarif};

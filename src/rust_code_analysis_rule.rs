@@ -94,7 +94,7 @@
 use crate::ci_report::{Finding, Location, Severity, ToFindings};
 use crate::error::{RaffError, Result};
 use crate::rule::Rule;
-use prettytable::{format as pt_format, Attr, Cell, Row, Table};
+use prettytable::{Attr, Cell, Row, Table, format as pt_format};
 use serde::{Deserialize, Serialize};
 // use std::fmt::Write; // No longer needed for HTML buffer
 use maud::html;
@@ -730,9 +730,15 @@ fn print_analysis_table(analysis_results: &[AnalysisUnit], project_root: &Path) 
     println!("--------------------");
     println!("File       : Path to the analyzed file, relative to the project root.");
     println!("SLOC       : Source Lines of Code - Non-comment, non-blank lines.");
-    println!("PLOC       : Physical Lines of Code - Total lines including comments and blanks (summed from functions).");
-    println!("LLOC       : Logical Lines of Code - Number of executable statements (summed from functions).");
-    println!("CLOC       : Comment Lines of Code - Lines containing only comments (summed from functions).");
+    println!(
+        "PLOC       : Physical Lines of Code - Total lines including comments and blanks (summed from functions)."
+    );
+    println!(
+        "LLOC       : Logical Lines of Code - Number of executable statements (summed from functions)."
+    );
+    println!(
+        "CLOC       : Comment Lines of Code - Lines containing only comments (summed from functions)."
+    );
     println!(
         "Blank      : Blank Lines - Lines containing only whitespace (summed from functions)."
     );
@@ -849,12 +855,11 @@ fn discover_and_filter_files(root_dir: &PathBuf, language: &str) -> Result<Vec<S
         }) {
             match entry_result {
                 Ok(entry) => {
-                    if entry.file_type().is_file() {
-                        if let Some(path_str) = entry.path().to_str() {
-                            if path_str.ends_with(extension) {
-                                discovered_files.push(path_str.to_string());
-                            }
-                        }
+                    if entry.file_type().is_file()
+                        && let Some(path_str) = entry.path().to_str()
+                        && path_str.ends_with(extension)
+                    {
+                        discovered_files.push(path_str.to_string());
                     }
                 }
                 Err(e) => {

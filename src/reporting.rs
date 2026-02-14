@@ -1,4 +1,4 @@
-use prettytable::{format, Cell, Row, Table};
+use prettytable::{Cell, Row, Table, format};
 use std::collections::HashMap;
 
 pub fn print_report(
@@ -34,10 +34,10 @@ pub fn print_report(
     ]));
 
     let mut sorted: Vec<_> = component_stats.iter().collect();
-    sorted.sort_unstable_by_key(|(_, &(_f, st))| std::cmp::Reverse(st));
+    sorted.sort_unstable_by_key(|&(_, &(_f, st))| std::cmp::Reverse(st));
 
     let mut any_over_threshold = false;
-    for (component, &(files, stmts)) in &sorted {
+    for &(component, &(files, stmts)) in &sorted {
         let percent = ((stmts as f64 / grand_total as f64) * 100.0).round() as usize;
         if percent > threshold {
             any_over_threshold = true;

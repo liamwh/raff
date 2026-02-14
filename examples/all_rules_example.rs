@@ -1,5 +1,5 @@
 use raff_core::error::Result;
-use raff_core::{all_rules, AllArgs, AllOutputFormat, CouplingGranularity};
+use raff_core::{AllArgs, AllOutputFormat, CouplingGranularity, all_rules};
 use std::path::PathBuf;
 
 fn main() -> Result<()> {

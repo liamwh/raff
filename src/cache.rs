@@ -978,14 +978,18 @@ mod tests {
 
         manager.remove(&key1).expect("remove should succeed");
 
-        assert!(manager
-            .get(&key1)
-            .expect("get key1 should succeed")
-            .is_none());
-        assert!(manager
-            .get(&key2)
-            .expect("get key2 should succeed")
-            .is_some());
+        assert!(
+            manager
+                .get(&key1)
+                .expect("get key1 should succeed")
+                .is_none()
+        );
+        assert!(
+            manager
+                .get(&key2)
+                .expect("get key2 should succeed")
+                .is_some()
+        );
     }
 
     #[test]

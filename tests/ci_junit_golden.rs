@@ -6,7 +6,7 @@
 //!
 //! Run `cargo insta review` to review changes after modifying the code.
 
-use raff_core::ci_report::{to_junit, Finding, Location, Severity};
+use raff_core::ci_report::{Finding, Location, Severity, to_junit};
 
 #[test]
 fn test_junit_empty() {

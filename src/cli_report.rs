@@ -8,7 +8,7 @@
 //! - Suggested action / documentation link
 
 use crate::ci_report::{Finding, Severity};
-use prettytable::{format, Attr, Cell, Row, Table};
+use prettytable::{Attr, Cell, Row, Table, format};
 
 /// Maximum width for the message column before truncation.
 const MAX_MESSAGE_WIDTH: usize = 60;

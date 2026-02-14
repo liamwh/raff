@@ -6,7 +6,7 @@
 //! - Real git repository scenarios
 //! - Backward compatibility with Raff.toml
 
-use raff_core::config_hierarchy::{find_git_repo_root, load_hierarchical_config, ConfigSourceType};
+use raff_core::config_hierarchy::{ConfigSourceType, find_git_repo_root, load_hierarchical_config};
 use serial_test::serial;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -103,7 +103,7 @@ normalize = false
     );
 
     // Set XDG_CONFIG_HOME
-    std::env::set_var("XDG_CONFIG_HOME", xdg_config);
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg_config) };
 
     // Create repo-local config that overrides user config
     let _repo_local_config = create_temp_config_file(
@@ -144,9 +144,9 @@ alpha = 0.03
 
     // Restore original environment
     if let Some(xdg) = original_xdg {
-        std::env::set_var("XDG_CONFIG_HOME", xdg);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
     } else {
-        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     // Verify loading succeeded
@@ -285,9 +285,9 @@ threshold = 10
 
     // Restore original environment
     if let Some(xdg) = original_xdg {
-        std::env::set_var("XDG_CONFIG_HOME", xdg);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
     } else {
-        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     let hierarchical = result.expect("load_hierarchical_config should succeed");
@@ -332,7 +332,7 @@ fn integration_backward_compatibility_with_raff_toml() {
     // Set XDG_CONFIG_HOME to a directory without raff config
     let xdg_config = temp_dir.path().join("xdg-config");
     fs::create_dir_all(&xdg_config).expect("Failed to create xdg config dir");
-    std::env::set_var("XDG_CONFIG_HOME", xdg_config);
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg_config) };
 
     // Create a traditional Raff.toml with various settings
     let raff_toml_content = r#"
@@ -373,9 +373,9 @@ decay = 0.9
 
     // Restore original environment
     if let Some(xdg) = original_xdg {
-        std::env::set_var("XDG_CONFIG_HOME", xdg);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
     } else {
-        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     let hierarchical = result.expect("load_hierarchical_config should succeed with Raff.toml");
@@ -464,7 +464,7 @@ fn integration_cli_explicit_path_bypasses_hierarchy() {
 threshold = 100
 "#,
     );
-    std::env::set_var("XDG_CONFIG_HOME", xdg_config);
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg_config) };
 
     // Initialize git repo and create repo-local config (should be ignored)
     init_git_repo(temp_dir.path());
@@ -512,9 +512,9 @@ alpha = 0.99
 
     // Restore original environment
     if let Some(xdg) = original_xdg {
-        std::env::set_var("XDG_CONFIG_HOME", xdg);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
     } else {
-        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     let hierarchical = result.expect("load_hierarchical_config should succeed");
@@ -572,7 +572,7 @@ threshold = 10
 alpha = 0.01
 "#,
     );
-    std::env::set_var("XDG_CONFIG_HOME", xdg_config);
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg_config) };
 
     // Repo-local config: threshold = 20, (no alpha)
     let _repo_config = create_temp_config_file(
@@ -608,9 +608,9 @@ alpha = 0.03
 
     // Restore original environment
     if let Some(xdg) = original_xdg {
-        std::env::set_var("XDG_CONFIG_HOME", xdg);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
     } else {
-        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     let hierarchical = result.expect("load_hierarchical_config should succeed");
@@ -644,7 +644,7 @@ fn integration_no_config_files_uses_defaults() {
     // Set XDG_CONFIG_HOME to empty directory
     let xdg_config = temp_dir.path().join("xdg-config");
     fs::create_dir_all(&xdg_config).expect("Failed to create xdg config dir");
-    std::env::set_var("XDG_CONFIG_HOME", xdg_config);
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg_config) };
 
     // Initialize git repo but don't create any config files
     init_git_repo(temp_dir.path());
@@ -660,9 +660,9 @@ fn integration_no_config_files_uses_defaults() {
 
     // Restore original environment
     if let Some(xdg) = original_xdg {
-        std::env::set_var("XDG_CONFIG_HOME", xdg);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
     } else {
-        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     let hierarchical =
@@ -700,7 +700,7 @@ fn integration_backward_compatibility_with_dot_raff_toml() {
     // Set XDG_CONFIG_HOME to empty directory
     let xdg_config = temp_dir.path().join("xdg-config");
     fs::create_dir_all(&xdg_config).expect("Failed to create xdg config dir");
-    std::env::set_var("XDG_CONFIG_HOME", xdg_config);
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg_config) };
 
     // Create .raff.toml file
     let _dot_raff_toml = create_temp_config_file(
@@ -726,9 +726,9 @@ alpha = 0.07
 
     // Restore original environment
     if let Some(xdg) = original_xdg {
-        std::env::set_var("XDG_CONFIG_HOME", xdg);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
     } else {
-        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     let hierarchical = result.expect("load_hierarchical_config should discover .raff.toml");
@@ -773,7 +773,7 @@ fn integration_outside_git_repo_no_repo_local_config() {
     // Set XDG_CONFIG_HOME to empty directory
     let xdg_config = temp_dir.path().join("xdg-config");
     fs::create_dir_all(&xdg_config).expect("Failed to create xdg config dir");
-    std::env::set_var("XDG_CONFIG_HOME", xdg_config);
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg_config) };
 
     // Do NOT initialize git repo (we're testing outside git)
 
@@ -795,9 +795,9 @@ fn integration_outside_git_repo_no_repo_local_config() {
 
     // Restore original environment
     if let Some(xdg) = original_xdg {
-        std::env::set_var("XDG_CONFIG_HOME", xdg);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
     } else {
-        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     }
 
     let hierarchical = result.expect("load_hierarchical_config should succeed outside git repo");

@@ -9,8 +9,8 @@ use raff_core::config::{
     PreCommitProfile, ProfileConfig, RaffConfig, RustCodeAnalysisConfig, StatementCountConfig,
     VolatilityConfig,
 };
-use raff_core::config_hierarchy::merge_configs;
 use raff_core::config_hierarchy::Mergeable;
+use raff_core::config_hierarchy::merge_configs;
 
 proptest::proptest! {
     /// Property: Merge idempotence.

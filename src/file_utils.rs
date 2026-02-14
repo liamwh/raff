@@ -46,12 +46,11 @@ use walkdir::WalkDir;
 pub fn collect_all_rs(dir: &Path, out_files: &mut Vec<PathBuf>) -> Result<()> {
     for entry_result in WalkDir::new(dir).into_iter() {
         let entry = entry_result?;
-        if entry.file_type().is_file() {
-            if let Some(ext) = entry.path().extension() {
-                if ext == "rs" {
-                    out_files.push(entry.into_path());
-                }
-            }
+        if entry.file_type().is_file()
+            && let Some(ext) = entry.path().extension()
+            && ext == "rs"
+        {
+            out_files.push(entry.into_path());
         }
     }
     Ok(())
@@ -125,10 +124,11 @@ pub fn relative_namespace(file_path: &Path, src_dir: &Path) -> String {
     let no_ext = rel_str.trim_end_matches(".rs");
 
     let mut parts: Vec<&str> = no_ext.split(std::path::MAIN_SEPARATOR).collect();
-    if let Some(last) = parts.last() {
-        if *last == "mod" && parts.len() > 1 {
-            parts.pop();
-        }
+    if let Some(last) = parts.last()
+        && *last == "mod"
+        && parts.len() > 1
+    {
+        parts.pop();
     }
 
     if parts.is_empty() {

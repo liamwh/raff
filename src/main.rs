@@ -2,11 +2,11 @@
 
 use clap::Parser;
 use raff_core::{
-    all_rules, apply_pre_commit_profile, error::Result, load_hierarchical_config, merge_all_args,
-    merge_contributor_report_args, merge_coupling_args, merge_rust_code_analysis_args,
-    merge_statement_count_args, merge_volatility_args, CacheManager, Cli, Commands,
-    ConfigSourceType, ContributorReportRule, CouplingRule, RustCodeAnalysisRule,
-    StatementCountRule, VolatilityRule,
+    CacheManager, Cli, Commands, ConfigSourceType, ContributorReportRule, CouplingRule,
+    RustCodeAnalysisRule, StatementCountRule, VolatilityRule, all_rules, apply_pre_commit_profile,
+    error::Result, load_hierarchical_config, merge_all_args, merge_contributor_report_args,
+    merge_coupling_args, merge_rust_code_analysis_args, merge_statement_count_args,
+    merge_volatility_args,
 };
 use std::process::exit;
 

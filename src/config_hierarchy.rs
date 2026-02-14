@@ -45,7 +45,7 @@
 //! # }
 //! ```
 
-use crate::config::{load_config_from_path, RaffConfig};
+use crate::config::{RaffConfig, load_config_from_path};
 use crate::error::{RaffError, Result};
 use std::path::{Path, PathBuf};
 
@@ -262,15 +262,15 @@ pub fn load_hierarchical_config(cli_explicit_path: Option<&Path>) -> Result<Hier
     }
 
     // Load repo-local config (overrides user)
-    if let Some(repo_path) = get_repo_local_config_path() {
-        if let Some(config) = load_config_from_path(&repo_path)? {
+    if let Some(repo_path) = get_repo_local_config_path()
+        && let Some(config) = load_config_from_path(&repo_path)?
+    {
             merged = merge_configs(&merged, &config);
             sources.push(ConfigSource::new(
                 ConfigSourceType::RepoLocal,
                 repo_path,
                 config,
             ));
-        }
     }
 
     // Load traditional local config (overrides repo)
@@ -747,7 +747,7 @@ threshold = 15
 
         // Set XDG_CONFIG_HOME to xdg_config for this test
         // get_user_config_dir() will append "raff" to get xdg_config/raff
-        std::env::set_var("XDG_CONFIG_HOME", xdg_config);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg_config) };
 
         // Also create a traditional config in the temp dir to avoid discovery issues
         let traditional_config = temp_dir.path().join("Raff.toml");
@@ -772,9 +772,9 @@ threshold = 10
 
         // Restore original environment before temp_dir is dropped
         if let Some(xdg) = original_xdg {
-            std::env::set_var("XDG_CONFIG_HOME", xdg);
+            unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg) };
         } else {
-            std::env::remove_var("XDG_CONFIG_HOME");
+            unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
         }
 
         // Now we can assert - temp_dir is still in scope but we're back in a valid directory

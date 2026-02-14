@@ -1,4 +1,4 @@
-use maud::{html, Markup, PreEscaped, DOCTYPE};
+use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 // Styles remain largely the same, but will be embedded directly by Maud
 pub(crate) fn get_styles() -> &'static str {

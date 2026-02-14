@@ -323,7 +323,7 @@ pub fn apply_pre_commit_profile(config: &RaffConfig) -> PreCommitSettings {
                 fast: false,
                 staged: false,
                 quiet: false,
-            }
+            };
         }
     };
 
@@ -522,11 +522,11 @@ pub fn merge_volatility_args(
     }
 
     // Merge output: CLI default is Table
-    if let Some(config_output) = &config.volatility.output {
-        if matches!(merged.output, crate::cli::VolatilityOutputFormat::Table) {
-            merged.output = parse_volatility_output_format(config_output)
-                .unwrap_or(crate::cli::VolatilityOutputFormat::Table);
-        }
+    if let Some(config_output) = &config.volatility.output
+        && matches!(merged.output, crate::cli::VolatilityOutputFormat::Table)
+    {
+        merged.output = parse_volatility_output_format(config_output)
+            .unwrap_or(crate::cli::VolatilityOutputFormat::Table);
     }
 
     // Merge output_file: CLI takes precedence if set, otherwise use config
@@ -562,19 +562,19 @@ pub fn merge_coupling_args(
     }
 
     // Merge output: CLI default is Table
-    if let Some(config_output) = &config.coupling.output {
-        if matches!(merged.output, crate::cli::CouplingOutputFormat::Table) {
-            merged.output = parse_coupling_output_format(config_output)
-                .unwrap_or(crate::cli::CouplingOutputFormat::Table);
-        }
+    if let Some(config_output) = &config.coupling.output
+        && matches!(merged.output, crate::cli::CouplingOutputFormat::Table)
+    {
+        merged.output = parse_coupling_output_format(config_output)
+            .unwrap_or(crate::cli::CouplingOutputFormat::Table);
     }
 
     // Merge granularity: CLI default is Both
-    if let Some(config_granularity) = &config.coupling.granularity {
-        if matches!(merged.granularity, crate::cli::CouplingGranularity::Both) {
-            merged.granularity = parse_coupling_granularity(config_granularity)
-                .unwrap_or(crate::cli::CouplingGranularity::Both);
-        }
+    if let Some(config_granularity) = &config.coupling.granularity
+        && matches!(merged.granularity, crate::cli::CouplingGranularity::Both)
+    {
+        merged.granularity = parse_coupling_granularity(config_granularity)
+            .unwrap_or(crate::cli::CouplingGranularity::Both);
     }
 
     // Merge output_file: CLI takes precedence if set, otherwise use config
@@ -632,14 +632,14 @@ pub fn merge_rust_code_analysis_args(
     }
 
     // Merge output: CLI default is Table
-    if let Some(config_output) = &config.rust_code_analysis.output {
-        if matches!(
+    if let Some(config_output) = &config.rust_code_analysis.output
+        && matches!(
             merged.output,
             crate::cli::RustCodeAnalysisOutputFormat::Table
-        ) {
-            merged.output = parse_rca_output_format(config_output)
-                .unwrap_or(crate::cli::RustCodeAnalysisOutputFormat::Table);
-        }
+        )
+    {
+        merged.output = parse_rca_output_format(config_output)
+            .unwrap_or(crate::cli::RustCodeAnalysisOutputFormat::Table);
     }
 
     // Merge metrics: CLI default is true
@@ -695,14 +695,14 @@ pub fn merge_contributor_report_args(
     }
 
     // Merge output: CLI default is Table
-    if let Some(config_output) = &config.contributor_report.output {
-        if matches!(
+    if let Some(config_output) = &config.contributor_report.output
+        && matches!(
             merged.output,
             crate::cli::ContributorReportOutputFormat::Table
-        ) {
-            merged.output = parse_contributor_report_output_format(config_output)
-                .unwrap_or(crate::cli::ContributorReportOutputFormat::Table);
-        }
+        )
+    {
+        merged.output = parse_contributor_report_output_format(config_output)
+            .unwrap_or(crate::cli::ContributorReportOutputFormat::Table);
     }
 
     // Merge output_file: from general config if not set on CLI
@@ -775,14 +775,14 @@ pub fn merge_all_args(cli_args: &crate::cli::AllArgs, config: &RaffConfig) -> cr
     }
 
     // Merge coupling granularity
-    if let Some(config_granularity) = &config.coupling.granularity {
-        if matches!(
+    if let Some(config_granularity) = &config.coupling.granularity
+        && matches!(
             merged.coup_granularity,
             crate::cli::CouplingGranularity::Both
-        ) {
-            merged.coup_granularity = parse_coupling_granularity(config_granularity)
-                .unwrap_or(crate::cli::CouplingGranularity::Both);
-        }
+        )
+    {
+        merged.coup_granularity = parse_coupling_granularity(config_granularity)
+            .unwrap_or(crate::cli::CouplingGranularity::Both);
     }
 
     // Merge RCA extra_flags
