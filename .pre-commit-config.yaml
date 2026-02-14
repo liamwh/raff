@@ -29,3 +29,13 @@ repos:
         pass_filenames: false
         always_run: true
         priority: 0
+
+  # Architecture fitness functions
+  - repo: local
+    hooks:
+      - id: raff-architecture-check
+        name: Architecture fitness functions
+        entry: raff --profile pre-commit all
+        language: system
+        pass_filenames: false
+        always_run: true

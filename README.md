@@ -70,9 +70,56 @@ For detailed options for each command, run:
 raff <COMMAND> --help
 ```
 
+## Pre-Commit Hook Integration 🔗
+
+raff includes a built-in `pre-commit` profile optimized for use as a pre-commit hook. This profile:
+- Runs only fast rules (statement-count, coupling) - skips slow volatility analysis
+- Analyzes only git-staged files via `git diff --name-only --cached`
+- Uses minimal output (summary line only)
+- Applies a more lenient threshold (25% vs 15% default)
+
+### Configuration
+
+Add raff to your `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: raff-architecture-check
+        name: Architecture fitness functions
+        entry: raff --profile pre-commit all
+        language: system
+        pass_filenames: false
+        always_run: true
+```
+
+### Pre-Commit Profile Settings
+
+The pre-commit profile can be customized in `.raff/raff.toml`:
+
+```toml
+[profile.pre_commit]
+fast = true      # Skip slow volatility analysis
+staged = true    # Only analyze staged files
+quiet = true     # Minimal output
+sc_threshold = 25  # Lenient threshold (vs 15% default)
+```
+
+### Manual Testing
+
+Test the pre-commit profile manually:
+
+```bash
+# Stage some files
+git add src/
+
+# Run with pre-commit profile
+raff --profile pre-commit all
+```
+
 ## TODOs / Future Work 🗺️
 
-$$
 The following enhancements are planned or could be valuable additions:
 
 * [ ] 🔶 FF: Do any domain objects use primitive types? (e.g. `String` instead of `Name`).
