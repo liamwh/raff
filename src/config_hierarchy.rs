@@ -254,23 +254,23 @@ pub fn load_hierarchical_config(cli_explicit_path: Option<&Path>) -> Result<Hier
     }
 
     // Load user-level config (lowest priority)
-    if let Some(user_path) = get_user_config_path() {
-        if let Some(config) = load_config_from_path(&user_path)? {
-            merged = merge_configs(&merged, &config);
-            sources.push(ConfigSource::new(ConfigSourceType::User, user_path, config));
-        }
+    if let Some(user_path) = get_user_config_path()
+        && let Some(config) = load_config_from_path(&user_path)?
+    {
+        merged = merge_configs(&merged, &config);
+        sources.push(ConfigSource::new(ConfigSourceType::User, user_path, config));
     }
 
     // Load repo-local config (overrides user)
     if let Some(repo_path) = get_repo_local_config_path()
         && let Some(config) = load_config_from_path(&repo_path)?
     {
-            merged = merge_configs(&merged, &config);
-            sources.push(ConfigSource::new(
-                ConfigSourceType::RepoLocal,
-                repo_path,
-                config,
-            ));
+        merged = merge_configs(&merged, &config);
+        sources.push(ConfigSource::new(
+            ConfigSourceType::RepoLocal,
+            repo_path,
+            config,
+        ));
     }
 
     // Load traditional local config (overrides repo)

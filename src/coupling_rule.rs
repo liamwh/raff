@@ -492,24 +492,23 @@ impl CouplingRule {
                 let origin_pkg_name = &origin_pkg_data.name;
                 for dep in &origin_pkg_data.dependencies {
                     if let Some(target_pkg_id_str) = workspace_package_names_to_ids.get(&dep.name)
-                        && origin_pkg_id_str != target_pkg_id_str {
-                            let target_pkg_name = workspace_packages_map
-                                .values()
-                                .find(|p| &p.id == target_pkg_id_str)
-                                .map(|p| &p.name)
-                                .unwrap_or_else(|| &dep.name);
-                            *efferent_couplings
-                                .entry(origin_pkg_name.clone())
-                                .or_insert(0) += 1;
-                            *afferent_couplings
-                                .entry(target_pkg_name.clone())
-                                .or_insert(0) += 1;
-                            if let Some(coupling_data) =
-                                crate_couplings_map.get_mut(origin_pkg_name)
-                            {
-                                coupling_data.dependencies.insert(target_pkg_name.clone());
-                            }
+                        && origin_pkg_id_str != target_pkg_id_str
+                    {
+                        let target_pkg_name = workspace_packages_map
+                            .values()
+                            .find(|p| &p.id == target_pkg_id_str)
+                            .map(|p| &p.name)
+                            .unwrap_or_else(|| &dep.name);
+                        *efferent_couplings
+                            .entry(origin_pkg_name.clone())
+                            .or_insert(0) += 1;
+                        *afferent_couplings
+                            .entry(target_pkg_name.clone())
+                            .or_insert(0) += 1;
+                        if let Some(coupling_data) = crate_couplings_map.get_mut(origin_pkg_name) {
+                            coupling_data.dependencies.insert(target_pkg_name.clone());
                         }
+                    }
                 }
             }
         }
@@ -1011,16 +1010,16 @@ impl CouplingRule {
                 && file_name != "main.rs"
                 && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
             {
-                    let mod_name = stem.to_string();
-                    let mod_path_str = if base_mod_path.to_string_lossy() == "crate" {
-                        format!("crate::{mod_name}")
-                    } else {
-                        format!("{}::{}", base_mod_path.to_string_lossy(), mod_name)
-                    };
-                    if !module_map.contains_key(&mod_path_str) {
-                        module_map.insert(mod_path_str.clone(), path.to_path_buf());
-                        self.discover_inline_modules(path, &mod_path_str, module_map)?;
-                    }
+                let mod_name = stem.to_string();
+                let mod_path_str = if base_mod_path.to_string_lossy() == "crate" {
+                    format!("crate::{mod_name}")
+                } else {
+                    format!("{}::{}", base_mod_path.to_string_lossy(), mod_name)
+                };
+                if !module_map.contains_key(&mod_path_str) {
+                    module_map.insert(mod_path_str.clone(), path.to_path_buf());
+                    self.discover_inline_modules(path, &mod_path_str, module_map)?;
+                }
             }
         }
         Ok(())
@@ -1043,12 +1042,12 @@ impl CouplingRule {
                     if let Item::Mod(item_mod) = item
                         && item_mod.content.is_some()
                     {
-                            let mod_name = item_mod.ident.to_string();
-                            let _inline_mod_path_str = if base_module_path_str == "crate" {
-                                format!("crate::{mod_name}")
-                            } else {
-                                format!("{base_module_path_str}::{mod_name}")
-                            };
+                        let mod_name = item_mod.ident.to_string();
+                        let _inline_mod_path_str = if base_module_path_str == "crate" {
+                            format!("crate::{mod_name}")
+                        } else {
+                            format!("{base_module_path_str}::{mod_name}")
+                        };
                     }
                 }
             }
@@ -1101,8 +1100,8 @@ impl<'a> Visit<'a> for ModuleDependencyVisitor<'a> {
         if let syn::Type::Path(type_path) = &*pt.ty
             && let Some(resolved_path) = self.resolve_path(&type_path.path)
         {
-                self.dependencies.insert(resolved_path);
-            }
+            self.dependencies.insert(resolved_path);
+        }
         syn::visit::visit_pat_type(self, pt);
     }
 }
