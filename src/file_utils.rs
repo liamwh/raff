@@ -34,20 +34,212 @@ use crate::error::Result;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// Default exclude patterns for Rust projects (used as fallback).
+const DEFAULT_EXCLUDE: &[&str] = &["target"];
+
+/// Read .gitignore patterns from the repository root.
+///
+/// # Arguments
+///
+/// * `repo_path` - Path to the repository root or any directory within it
+///
+/// # Returns
+///
+/// A vector of patterns from .gitignore, or an empty vector if not found.
+pub fn get_gitignore_patterns(repo_path: &Path) -> Vec<String> {
+    // Find the .git directory to determine the repo root
+    let repo_root = find_git_root(repo_path);
+
+    let gitignore_path = match repo_root {
+        Some(root) => root.join(".gitignore"),
+        None => return Vec::new(),
+    };
+
+    if !gitignore_path.exists() {
+        return Vec::new();
+    }
+
+    match std::fs::read_to_string(&gitignore_path) {
+        Ok(content) => {
+            let mut patterns = Vec::new();
+            for line in content.lines() {
+                let line = line.trim();
+                // Skip empty lines and comments
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                // Skip negation patterns for now (lines starting with !)
+                if line.starts_with('!') {
+                    continue;
+                }
+                patterns.push(line.to_string());
+            }
+            patterns
+        }
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Find the git repository root by searching for .git directory.
+///
+/// # Arguments
+///
+/// * `start_path` - Path to start searching from
+///
+/// # Returns
+///
+/// Some(PathBuf) if git root is found, None otherwise.
+fn find_git_root(start_path: &Path) -> Option<PathBuf> {
+    let mut path = start_path.canonicalize().ok()?;
+
+    loop {
+        let git_dir = path.join(".git");
+        if git_dir.exists() {
+            return Some(path);
+        }
+
+        if !path.pop() {
+            break;
+        }
+    }
+
+    None
+}
+
+/// Checks if a path should be excluded based on exclusion patterns.
+///
+/// # Arguments
+///
+/// * `path` - The path to check
+/// * `exclude_patterns` - List of glob patterns to match against
+///
+/// # Returns
+///
+/// `true` if the path matches any exclusion pattern, `false` otherwise.
+pub fn should_exclude(path: &Path, exclude_patterns: &[String]) -> bool {
+    let path_str = path.to_string_lossy();
+
+    for pattern in exclude_patterns {
+        // Simple pattern matching:
+        // - If pattern contains no separator, match any directory/component with that name
+        // - If pattern starts with "**/", match at any depth
+        // - Otherwise, do a simple substring match
+        if pattern.contains('/') {
+            // Pattern with path separators - check if path ends with pattern or contains it
+            if path_str.contains(pattern) || path_str.ends_with(pattern) {
+                return true;
+            }
+        } else {
+            // Simple component name - check if any component matches
+            for component in path.components() {
+                let name = component.as_os_str().to_string_lossy();
+                if name == *pattern {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Creates a default exclude list, combining gitignore patterns, user-provided patterns, and defaults.
+///
+/// # Arguments
+///
+/// * `user_exclude` - Optional user-provided exclude patterns
+/// * `repo_path` - Path to the repository to read .gitignore from
+///
+/// # Returns
+///
+/// A vector of exclude patterns including defaults.
+pub fn get_default_exclude(
+    user_exclude: Option<&[String]>,
+    repo_path: Option<&Path>,
+) -> Vec<String> {
+    let mut exclude: Vec<String> = DEFAULT_EXCLUDE.iter().map(|s| s.to_string()).collect();
+
+    // Add .gitignore patterns if in a git repository
+    if let Some(path) = repo_path {
+        let gitignore_patterns = get_gitignore_patterns(path);
+        for pattern in gitignore_patterns {
+            if !exclude.contains(&pattern) {
+                exclude.push(pattern);
+            }
+        }
+    }
+
+    // Add user-provided patterns
+    if let Some(user_patterns) = user_exclude {
+        for pattern in user_patterns {
+            if !exclude.contains(pattern) {
+                exclude.push(pattern.clone());
+            }
+        }
+    }
+
+    exclude
+}
+
+/// Creates a default exclude list with automatic repo path detection.
+///
+/// Uses the current directory to find the git repository root.
+///
+/// # Arguments
+///
+/// * `user_exclude` - Optional user-provided exclude patterns
+///
+/// # Returns
+///
+/// A vector of exclude patterns including defaults.
+pub fn get_default_exclude_from_cwd(user_exclude: Option<&[String]>) -> Vec<String> {
+    let cwd = std::env::current_dir().ok();
+    get_default_exclude(user_exclude, cwd.as_deref())
+}
+
 /// Recursively collect every `.rs` file under `dir` into `out_files`.
 ///
 /// # Parameters
 /// - `dir`: the directory (e.g. "./src") to walk.
 /// - `out_files`: a `Vec<PathBuf>` to push each discovered `.rs` file into.
+/// - `exclude_patterns`: Optional list of glob patterns to exclude. If None, will use
+///   .gitignore patterns plus default "target" exclusion.
 ///
 /// # Returns
 /// - `Ok(())` if successful.
 /// - `Err` if directory traversal fails.
-pub fn collect_all_rs(dir: &Path, out_files: &mut Vec<PathBuf>) -> Result<()> {
+pub fn collect_all_rs(
+    dir: &Path,
+    out_files: &mut Vec<PathBuf>,
+    exclude_patterns: Option<&[String]>,
+) -> Result<()> {
+    let default_exclude = get_default_exclude(exclude_patterns, Some(dir));
+    let exclude = if exclude_patterns.is_some() {
+        // If user provided patterns, combine them with gitignore
+        default_exclude
+    } else {
+        // Use gitignore + defaults
+        get_default_exclude_from_cwd(None)
+    };
+
     for entry_result in WalkDir::new(dir).into_iter() {
         let entry = entry_result?;
+        let path = entry.path();
+
+        // Skip excluded paths
+        if should_exclude(path, &exclude) {
+            // Skip this entry and its children if it's a directory
+            if entry.file_type().is_dir() {
+                continue;
+            }
+            // For files, just skip
+            if entry.file_type().is_file() {
+                continue;
+            }
+        }
+
         if entry.file_type().is_file()
-            && let Some(ext) = entry.path().extension()
+            && let Some(ext) = path.extension()
             && ext == "rs"
         {
             out_files.push(entry.into_path());
@@ -66,6 +258,7 @@ pub fn collect_all_rs(dir: &Path, out_files: &mut Vec<PathBuf>) -> Result<()> {
 /// - `dir`: the directory to analyze (e.g. "./src")
 /// - `staged`: if true, only return git-staged files; if false, return all files
 /// - `out_files`: a `Vec<PathBuf>` to push discovered files into
+/// - `exclude_patterns`: Optional list of glob patterns to exclude.
 ///
 /// # Returns
 /// - `Ok(())` if successful
@@ -74,7 +267,12 @@ pub fn collect_all_rs(dir: &Path, out_files: &mut Vec<PathBuf>) -> Result<()> {
 /// # Notes
 /// When `staged` is true and no staged `.rs` files are found (or not in a git repo),
 /// this function falls back to collecting all files to avoid breaking analysis.
-pub fn collect_rs_files(dir: &Path, staged: bool, out_files: &mut Vec<PathBuf>) -> Result<()> {
+pub fn collect_rs_files(
+    dir: &Path,
+    staged: bool,
+    out_files: &mut Vec<PathBuf>,
+    exclude_patterns: Option<&[String]>,
+) -> Result<()> {
     if staged {
         // Try to get staged files
         if let Ok(staged_files) = crate::git_utils::get_staged_files() {
@@ -98,7 +296,7 @@ pub fn collect_rs_files(dir: &Path, staged: bool, out_files: &mut Vec<PathBuf>) 
         // If git failed or no staged files, collect all files
     }
     // Default behavior: collect all .rs files
-    collect_all_rs(dir, out_files)
+    collect_all_rs(dir, out_files, exclude_patterns)
 }
 
 /// Given a full file path (e.g. "/.../mycrate/src/foo/bar.rs") and the `src_dir` (e.g. "src"),
@@ -162,7 +360,7 @@ mod tests {
     fn test_collect_all_rs_returns_empty_for_empty_directory() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let mut files = Vec::new();
-        let result = collect_all_rs(temp_dir.path(), &mut files);
+        let result = collect_all_rs(temp_dir.path(), &mut files, None);
         assert!(
             result.is_ok(),
             "collect_all_rs should succeed for empty directory"
@@ -179,7 +377,7 @@ mod tests {
         File::create(temp_dir.path().join("test.rs")).expect("Failed to create test file");
 
         let mut files = Vec::new();
-        collect_all_rs(temp_dir.path(), &mut files).expect("Failed to collect .rs files");
+        collect_all_rs(temp_dir.path(), &mut files, None).expect("Failed to collect .rs files");
 
         assert_eq!(
             files.len(),
@@ -201,7 +399,7 @@ mod tests {
         File::create(temp_dir.path().join("baz.rs")).expect("Failed to create baz.rs");
 
         let mut files = Vec::new();
-        collect_all_rs(temp_dir.path(), &mut files).expect("Failed to collect .rs files");
+        collect_all_rs(temp_dir.path(), &mut files, None).expect("Failed to collect .rs files");
 
         assert_eq!(files.len(), 3, "collect_all_rs should find all 3 .rs files");
     }
@@ -214,7 +412,7 @@ mod tests {
         File::create(temp_dir.path().join("test.toml")).expect("Failed to create test.toml");
 
         let mut files = Vec::new();
-        collect_all_rs(temp_dir.path(), &mut files).expect("Failed to collect .rs files");
+        collect_all_rs(temp_dir.path(), &mut files, None).expect("Failed to collect .rs files");
 
         assert_eq!(
             files.len(),
@@ -238,7 +436,7 @@ mod tests {
         File::create(subdir.join("nested.rs")).expect("Failed to create nested.rs");
 
         let mut files = Vec::new();
-        collect_all_rs(temp_dir.path(), &mut files).expect("Failed to collect .rs files");
+        collect_all_rs(temp_dir.path(), &mut files, None).expect("Failed to collect .rs files");
 
         assert_eq!(
             files.len(),
@@ -258,7 +456,7 @@ mod tests {
         File::create(level3.join("deep.rs")).expect("Failed to create deep.rs");
 
         let mut files = Vec::new();
-        collect_all_rs(temp_dir.path(), &mut files).expect("Failed to collect .rs files");
+        collect_all_rs(temp_dir.path(), &mut files, None).expect("Failed to collect .rs files");
 
         assert_eq!(
             files.len(),

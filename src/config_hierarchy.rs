@@ -330,6 +330,10 @@ pub trait Mergeable: Sized {
 
 impl Mergeable for crate::config::GeneralConfig {
     fn merge(&self, other: &Self) -> Self {
+        // Combine exclude lists - other's exclusions are appended to self's
+        let mut exclude = self.exclude.clone();
+        exclude.extend(other.exclude.clone());
+
         Self {
             path: other.path.clone().or_else(|| self.path.clone()),
             verbose: other.verbose || self.verbose,
@@ -337,6 +341,7 @@ impl Mergeable for crate::config::GeneralConfig {
                 .output_file
                 .clone()
                 .or_else(|| self.output_file.clone()),
+            exclude,
         }
     }
 }
@@ -580,17 +585,21 @@ mod tests {
             path: Some(PathBuf::from("/base/path")),
             verbose: false,
             output_file: None,
+            exclude: vec!["base_exclude".to_string()],
         };
         let override_ = GeneralConfig {
             path: Some(PathBuf::from("/override/path")),
             verbose: true,
             output_file: None,
+            exclude: vec!["override_exclude".to_string()],
         };
 
         let merged = base.merge(&override_);
 
         assert_eq!(merged.path, Some(PathBuf::from("/override/path")));
         assert!(merged.verbose);
+        // Exclude patterns should be combined
+        assert_eq!(merged.exclude, vec!["base_exclude", "override_exclude"]);
     }
 
     #[test]
@@ -599,17 +608,20 @@ mod tests {
             path: Some(PathBuf::from("/base/path")),
             verbose: false,
             output_file: None,
+            exclude: vec![],
         };
         let override_ = GeneralConfig {
             path: None,
             verbose: true,
             output_file: None,
+            exclude: vec!["override_exclude".to_string()],
         };
 
         let merged = base.merge(&override_);
 
         assert_eq!(merged.path, Some(PathBuf::from("/base/path")));
         assert!(merged.verbose);
+        assert_eq!(merged.exclude, vec!["override_exclude"]);
     }
 
     #[test]

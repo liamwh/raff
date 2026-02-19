@@ -66,6 +66,15 @@ pub struct GeneralConfig {
     /// Output file path for the report.
     /// When specified, writes output to the file instead of stdout.
     pub output_file: Option<PathBuf>,
+
+    /// Directory patterns to exclude from analysis.
+    /// Supports glob patterns (e.g., "target", "node_modules", "**/target").
+    #[serde(default = "default_exclude")]
+    pub exclude: Vec<String>,
+}
+
+fn default_exclude() -> Vec<String> {
+    vec!["target".to_string()]
 }
 
 /// Statement count rule configuration.

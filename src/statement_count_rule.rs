@@ -287,7 +287,7 @@ impl StatementCountRule {
         }
 
         let mut all_rs_files: Vec<PathBuf> = Vec::new();
-        crate::file_utils::collect_rs_files(analysis_path, args.staged, &mut all_rs_files)?;
+        crate::file_utils::collect_rs_files(analysis_path, args.staged, &mut all_rs_files, None)?;
 
         if all_rs_files.is_empty() {
             return Err(RaffError::analysis_error(

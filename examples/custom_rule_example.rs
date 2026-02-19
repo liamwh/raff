@@ -110,7 +110,7 @@ impl Rule for FileSizeRule {
 
     fn analyze(&self, config: &Self::Config) -> Result<Self::Data> {
         let mut source_files = Vec::new();
-        file_utils::collect_all_rs(&config.path, &mut source_files)?;
+        file_utils::collect_all_rs(&config.path, &mut source_files, None)?;
 
         let mut oversized_files = Vec::new();
 
@@ -146,7 +146,7 @@ impl Rule for FileSizeRule {
         oversized_files.sort_by(|a, b| b.excess_bytes.cmp(&a.excess_bytes));
 
         let mut all_files = Vec::new();
-        file_utils::collect_all_rs(&config.path, &mut all_files)?;
+        file_utils::collect_all_rs(&config.path, &mut all_files, None)?;
 
         Ok(FileSizeData {
             total_files: all_files.len(),
