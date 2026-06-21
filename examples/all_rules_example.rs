@@ -8,6 +8,7 @@ fn main() -> Result<()> {
         output: AllOutputFormat::Html,
         fast: false,
         quiet: false,
+        fail_on_warnings: false,
         sc_threshold: 10,
         vol_alpha: 0.01,
         vol_since: None,

@@ -324,31 +324,29 @@ pub struct PreCommitSettings {
 /// ```
 #[must_use]
 pub fn apply_pre_commit_profile(config: &RaffConfig) -> PreCommitSettings {
-    let pc = match &config.profile.pre_commit {
-        Some(p) => p,
-        None => {
-            return PreCommitSettings {
-                config: config.clone(),
-                fast: false,
-                staged: false,
-                quiet: false,
-            };
-        }
-    };
+    let default_fast = true;
+    let default_staged = true;
+    let default_quiet = true;
+    let default_sc_threshold = 25;
+    let pc = config.profile.pre_commit.as_ref();
 
     let mut result = config.clone();
 
     // Apply statement count threshold from profile if set
-    if let Some(threshold) = pc.sc_threshold {
-        result.statement_count.threshold = threshold;
-    }
+    result.statement_count.threshold = pc
+        .and_then(|profile| profile.sc_threshold)
+        .unwrap_or(default_sc_threshold);
 
     // Return profile settings for runtime behavior
     PreCommitSettings {
         config: result,
-        fast: pc.fast.unwrap_or(false),
-        staged: pc.staged.unwrap_or(false),
-        quiet: pc.quiet.unwrap_or(false),
+        fast: pc.and_then(|profile| profile.fast).unwrap_or(default_fast),
+        staged: pc
+            .and_then(|profile| profile.staged)
+            .unwrap_or(default_staged),
+        quiet: pc
+            .and_then(|profile| profile.quiet)
+            .unwrap_or(default_quiet),
     }
 }
 
@@ -827,6 +825,7 @@ pub fn merge_all_args(cli_args: &crate::cli::AllArgs, config: &RaffConfig) -> cr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::io::Write;
     use std::process::Command;
     use tempfile::NamedTempFile;
@@ -1002,6 +1001,7 @@ decay = 0.05
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_discover_and_load_config_finds_raff_toml() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let config_path = temp_dir.path().join("Raff.toml");
@@ -1045,6 +1045,7 @@ verbose = true
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_discover_and_load_config_finds_dot_raff_toml() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let config_path = temp_dir.path().join(".raff.toml");
@@ -1085,6 +1086,7 @@ threshold = 50
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_discover_and_load_config_returns_none_when_no_config() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
 
@@ -1138,6 +1140,7 @@ alpha = 0.1
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_load_config_with_none_path_discovers_config() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let config_path = temp_dir.path().join("Raff.toml");
@@ -1460,6 +1463,7 @@ verbose = true
             output: crate::cli::AllOutputFormat::Html,
             fast: false,
             quiet: false,
+            fail_on_warnings: false,
             sc_threshold: 10,
             vol_alpha: 0.01,
             vol_since: None,
@@ -1688,25 +1692,21 @@ sc_threshold = 15
     }
 
     #[test]
-    fn test_apply_pre_commit_profile_with_no_profile_returns_config_unchanged() {
+    fn test_apply_pre_commit_profile_with_no_profile_returns_built_in_defaults() {
         let config = RaffConfig::default();
-        let original_threshold = config.statement_count.threshold;
 
         let result = apply_pre_commit_profile(&config);
 
         assert_eq!(
-            result.config.statement_count.threshold, original_threshold,
-            "threshold should remain unchanged when no profile is set"
+            result.config.statement_count.threshold, 25,
+            "threshold should fall back to the built-in pre-commit default"
         );
-        assert!(!result.fast, "fast should be false when no profile is set");
+        assert!(result.fast, "fast should default to true for pre-commit");
         assert!(
-            !result.staged,
-            "staged should be false when no profile is set"
+            result.staged,
+            "staged should default to true for pre-commit"
         );
-        assert!(
-            !result.quiet,
-            "quiet should be false when no profile is set"
-        );
+        assert!(result.quiet, "quiet should default to true for pre-commit");
     }
 
     #[test]
@@ -1780,15 +1780,9 @@ sc_threshold = 15
             result.config.statement_count.threshold, 30,
             "only sc_threshold should be applied"
         );
-        assert!(!result.fast, "fast should be false when not set in profile");
-        assert!(
-            !result.staged,
-            "staged should be false when not set in profile"
-        );
-        assert!(
-            !result.quiet,
-            "quiet should be false when not set in profile"
-        );
+        assert!(result.fast, "fast should default to true when not set");
+        assert!(result.staged, "staged should default to true when not set");
+        assert!(result.quiet, "quiet should default to true when not set");
     }
 
     #[test]
@@ -1834,6 +1828,7 @@ sc_threshold = 15
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_discover_and_load_config_finds_raff_directory_config() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
 
@@ -1899,6 +1894,7 @@ threshold = 15
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_discover_and_load_config_prioritizes_local_config_over_raff_directory() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
 
@@ -1971,6 +1967,7 @@ threshold = 50
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_discover_and_load_config_finds_raff_directory_from_subdirectory() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
 
@@ -2031,6 +2028,7 @@ granularity = "module"
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_discover_and_load_config_returns_none_when_only_raff_dir_exists_but_no_config() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
 

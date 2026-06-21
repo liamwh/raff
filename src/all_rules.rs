@@ -23,6 +23,7 @@
 //!     output: AllOutputFormat::Json,
 //!     fast: false,
 //!     quiet: false,
+//!     fail_on_warnings: false,
 //!     staged: false,
 //!     // .. other fields
 //!     sc_threshold: 10,
@@ -157,9 +158,14 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
     };
 
     let all_data = if args.fast {
-        // Fast mode: only run statement-count and coupling (skip volatility and rust-code-analysis)
+        // In staged fast mode, skip statement-count because component-percentage
+        // metrics over a staged subset are not meaningful.
         AllReportData {
-            statement_count: Some(sc_rule.analyze(&sc_args)),
+            statement_count: if args.staged {
+                None
+            } else {
+                Some(sc_rule.analyze(&sc_args))
+            },
             volatility: None,
             coupling: Some(coup_rule.analyze(&coup_args)),
             rust_code_analysis: None,
@@ -249,7 +255,7 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
             // Sort by severity (Error first) then rule
             all_findings.sort_by_key(|f| (!f.severity.is_error(), f.rule_id.clone()));
 
-            if args.quiet {
+            if args.quiet && all_findings.is_empty() {
                 let summary = crate::cli_report::render_summary_line(&all_findings);
                 println!("{summary}");
             } else {
@@ -259,11 +265,12 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
 
             // Return error if any findings are Error severity
             let has_errors = all_findings.iter().any(|f| f.severity == Severity::Error);
-            if has_errors {
+            let should_fail_on_findings = args.fail_on_warnings && !all_findings.is_empty();
+            if has_errors || should_fail_on_findings {
                 return Err(crate::error::RaffError::analysis_error(
                     "all",
                     format!(
-                        "Found {} issue{} ({} error{})",
+                        "Found {} issue{} ({} error{}, {} warning{})",
                         all_findings.len(),
                         if all_findings.len() == 1 { "" } else { "s" },
                         all_findings
@@ -273,6 +280,20 @@ pub fn run_all(args: &AllArgs) -> Result<()> {
                         if all_findings
                             .iter()
                             .filter(|f| f.severity == Severity::Error)
+                            .count()
+                            == 1
+                        {
+                            ""
+                        } else {
+                            "s"
+                        },
+                        all_findings
+                            .iter()
+                            .filter(|f| f.severity == Severity::Warning)
+                            .count(),
+                        if all_findings
+                            .iter()
+                            .filter(|f| f.severity == Severity::Warning)
                             .count()
                             == 1
                         {
@@ -370,6 +391,7 @@ mod tests {
             output: AllOutputFormat::Json,
             fast: false,
             quiet: false,
+            fail_on_warnings: false,
             sc_threshold: 10,
             vol_alpha: 0.01,
             vol_since: None,

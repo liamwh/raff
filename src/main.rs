@@ -2,11 +2,11 @@
 
 use clap::Parser;
 use raff_core::{
-    CacheManager, Cli, Commands, ConfigSourceType, ContributorReportRule, CouplingRule,
-    RustCodeAnalysisRule, StatementCountRule, VolatilityRule, all_rules, apply_pre_commit_profile,
-    error::Result, load_hierarchical_config, merge_all_args, merge_contributor_report_args,
-    merge_coupling_args, merge_rust_code_analysis_args, merge_statement_count_args,
-    merge_volatility_args,
+    AllOutputFormat, CacheManager, Cli, Commands, ConfigSourceType, ContributorReportRule,
+    CouplingGranularity, CouplingRule, RustCodeAnalysisRule, StatementCountRule, VolatilityRule,
+    all_rules, apply_pre_commit_profile, error::RaffError, error::Result, load_hierarchical_config,
+    merge_all_args, merge_contributor_report_args, merge_coupling_args,
+    merge_rust_code_analysis_args, merge_statement_count_args, merge_volatility_args,
 };
 use std::process::exit;
 
@@ -64,19 +64,19 @@ fn main() -> Result<()> {
     }
 
     // Apply profile if requested via --profile flag
-    let (config, profile_fast, profile_staged, profile_quiet) =
-        if cli_args.profile.as_deref() == Some("pre-commit") {
-            tracing::info!("Applying pre-commit profile configuration");
-            let settings = apply_pre_commit_profile(&hierarchical_result.merged);
-            (
-                settings.config,
-                settings.fast,
-                settings.staged,
-                settings.quiet,
-            )
-        } else {
-            (hierarchical_result.merged.clone(), false, false, false)
-        };
+    let pre_commit_profile_active = cli_args.profile.as_deref() == Some("pre-commit");
+    let (config, profile_fast, profile_staged, profile_quiet) = if pre_commit_profile_active {
+        tracing::info!("Applying pre-commit profile configuration");
+        let settings = apply_pre_commit_profile(&hierarchical_result.merged);
+        (
+            settings.config,
+            settings.fast,
+            settings.staged,
+            settings.quiet,
+        )
+    } else {
+        (hierarchical_result.merged.clone(), false, false, false)
+    };
 
     let run_result = match cli_args.command {
         Commands::StatementCount(mut args) => {
@@ -129,6 +129,13 @@ fn main() -> Result<()> {
             let mut merged_args = merge_all_args(&args, &config);
             // Propagate global staged flag and profile staged setting
             merged_args.staged = cli_args.staged || profile_staged || args.staged;
+            if pre_commit_profile_active {
+                merged_args.output = AllOutputFormat::Cli;
+                merged_args.fail_on_warnings = true;
+                if matches!(merged_args.coup_granularity, CouplingGranularity::Both) {
+                    merged_args.coup_granularity = CouplingGranularity::Crate;
+                }
+            }
             tracing::info!("Running all rules with args: {:?}", merged_args);
             all_rules::run_all(&merged_args)
         }
@@ -144,8 +151,9 @@ fn main() -> Result<()> {
     };
 
     if let Err(e) = run_result {
-        // Using color-eyre's report format
-        eprintln!("{e:?}");
+        if !matches!(e, RaffError::AnalysisError { .. }) {
+            eprintln!("{e}");
+        }
         exit(1);
     }
 

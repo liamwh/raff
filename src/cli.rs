@@ -297,9 +297,14 @@ pub struct AllArgs {
     pub fast: bool,
 
     /// Minimal output (summary line only).
-    /// Suppresses the full table output and prints only a single-line summary.
+    /// Prints a summary when there are no findings, and a full table when there are.
     #[clap(long)]
     pub quiet: bool,
+
+    /// Treat warnings as failures.
+    /// Useful for deterministic quality gates such as pre-commit hooks.
+    #[clap(long)]
+    pub fail_on_warnings: bool,
 
     /// Percentage threshold for component size (0-100).
     #[clap(long, default_value_t = 10)]

@@ -74,10 +74,10 @@ raff <COMMAND> --help
 ## Pre-Commit Hook Integration 🔗
 
 raff includes a built-in `pre-commit` profile optimized for use as a pre-commit hook. This profile:
-- Runs only fast rules (statement-count, coupling) - skips slow volatility analysis
-- Analyzes only git-staged files via `git diff --name-only --cached`
-- Uses minimal output (summary line only)
-- Applies a more lenient threshold (25% vs 15% default)
+- Analyzes only git-staged changes
+- Uses fast, read-only coupling checks suitable for commit hooks
+- Prints a single-line summary on success and a CLI table on failure
+- Fails the hook when it finds warnings or errors
 
 ### Configuration
 
@@ -92,19 +92,20 @@ repos:
         entry: raff --profile pre-commit all
         language: system
         pass_filenames: false
-        always_run: true
+        files: '(^|/)Cargo\.toml$|(^|/)Cargo\.lock$|(^|/)rust-toolchain(\.toml)?$|^\.cargo/|\.rs$'
 ```
 
 ### Pre-Commit Profile Settings
 
-The pre-commit profile can be customized in `.raff/raff.toml`:
+The built-in defaults work without any extra configuration. If you want to override them,
+the pre-commit profile can be customized in `.raff/raff.toml`:
 
 ```toml
 [profile.pre_commit]
-fast = true      # Skip slow volatility analysis
-staged = true    # Only analyze staged files
-quiet = true     # Minimal output
-sc_threshold = 25  # Lenient threshold (vs 15% default)
+fast = true
+staged = true
+quiet = true
+sc_threshold = 25
 ```
 
 ### Manual Testing
