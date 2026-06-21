@@ -10,7 +10,7 @@ expression: json
       "tool": {
         "driver": {
           "name": "raff",
-          "version": "0.1.3",
+          "version": "0.1.4",
           "rules": [
             {
               "id": "volatility",
