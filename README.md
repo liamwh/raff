@@ -20,15 +20,16 @@ Inspired by [Mark Richards](https://developertoarchitect.com/mark-richards.html)
 
 ### Installation
 
-You can install `raff` directly using `cargo`:
-
 ```bash
 cargo install raff-cli
+
+brew install liamwh/raff/raff
+
+# from source, install to ~/bin
+just install
 ```
 
-*(Assuming your crate is published on crates.io as `raff-cli`. If installing from a Git repository, the command would be `cargo install --git https://github.com/liamwh/raff.git` or similar if it's not yet on crates.io)*
-
-Once installed, the `raff` binary will be available in your Cargo binary path.
+Once installed, the `raff` binary will be available on your `PATH`.
 
 ### Running
 

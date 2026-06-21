@@ -132,12 +132,11 @@ validate-hooks:
 # Install raff to ~/bin
 install:
     #!/bin/bash
-    set -e
+    set -euo pipefail
     BIN_DIR="$HOME/bin"
     mkdir -p "$BIN_DIR"
     echo "🔨 Building raff..."
-    cargo build --release
+    cargo build --locked --release
     echo "📦 Installing raff to $BIN_DIR..."
-    cp target/release/raff "$BIN_DIR/raff"
+    install -m 0755 target/release/raff "$BIN_DIR/raff"
     echo "✅ raff installed to $BIN_DIR/raff"
-

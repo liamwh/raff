@@ -392,7 +392,10 @@ impl StatementCountRule {
                 }
                 tbody {
                     @for (name, (file_count, st_count)) in sorted_components {
-                        @let percentage = if data.grand_total > 0 { (*st_count * 100) / data.grand_total } else { 0 };
+                        @let percentage = st_count
+                            .checked_mul(100)
+                            .and_then(|count| count.checked_div(data.grand_total))
+                            .unwrap_or(0);
                         @let percentage_style = html_utils::get_cell_style(percentage as f64, data.threshold as f64, data.threshold as f64, false);
                         tr {
                             td { (name) }

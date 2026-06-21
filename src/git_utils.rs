@@ -135,9 +135,36 @@ pub fn filter_rust_files(files: &[PathBuf]) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::fs;
     use std::io::Write;
+    use std::path::{Path, PathBuf};
     use tempfile::TempDir;
+
+    struct CurrentDirGuard {
+        original_dir: PathBuf,
+        fallback_dir: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn enter(path: &Path) -> Self {
+            let fallback_dir = std::env::temp_dir();
+            let original_dir = std::env::current_dir().unwrap_or_else(|_| fallback_dir.clone());
+            std::env::set_current_dir(path).expect("Failed to change dir");
+
+            Self {
+                original_dir,
+                fallback_dir,
+            }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original_dir)
+                .or_else(|_| std::env::set_current_dir(&self.fallback_dir));
+        }
+    }
 
     #[test]
     fn test_filter_rust_files_filters_correctly() {
@@ -235,19 +262,15 @@ mod tests {
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_get_staged_files_returns_empty_when_not_in_git() {
         // Create a temp directory that is not a git repo
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
 
-        // Change to the non-git directory
-        let original_dir = std::env::current_dir().expect("Failed to get current dir");
-        std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
+        let _cwd_guard = CurrentDirGuard::enter(temp_dir.path());
 
         // get_staged_files should return Ok with empty vec when not in git
         let result = get_staged_files();
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
 
         assert!(
             result.is_ok(),
@@ -261,6 +284,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_get_staged_files_returns_empty_when_no_staged_files() {
         // Create a temp git repo with no staged files
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
@@ -287,15 +311,10 @@ mod tests {
             .current_dir(temp_dir.path())
             .status();
 
-        // Change to the git repo directory
-        let original_dir = std::env::current_dir().expect("Failed to get current dir");
-        std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
+        let _cwd_guard = CurrentDirGuard::enter(temp_dir.path());
 
         // get_staged_files should return empty vec when no files are staged
         let result = get_staged_files();
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
 
         assert!(result.is_ok(), "get_staged_files should succeed");
         let files = result.unwrap();
@@ -306,6 +325,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_get_staged_files_detects_staged_files() {
         // Create a temp git repo with a staged file
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
@@ -343,15 +363,10 @@ mod tests {
             .current_dir(temp_dir.path())
             .status();
 
-        // Change to the git repo directory
-        let original_dir = std::env::current_dir().expect("Failed to get current dir");
-        std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
+        let _cwd_guard = CurrentDirGuard::enter(temp_dir.path());
 
         // get_staged_files should detect the staged file
         let result = get_staged_files();
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
 
         assert!(result.is_ok(), "get_staged_files should succeed");
         let files = result.unwrap();
@@ -368,19 +383,15 @@ mod tests {
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_get_repo_root_returns_none_when_not_in_git() {
         // Create a temp directory that is not a git repo
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
 
-        // Change to the non-git directory
-        let original_dir = std::env::current_dir().expect("Failed to get current dir");
-        std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
+        let _cwd_guard = CurrentDirGuard::enter(temp_dir.path());
 
         // get_repo_root should return Ok with None when not in git
         let result = get_repo_root();
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
 
         assert!(
             result.is_ok(),
@@ -394,6 +405,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_get_repo_root_finds_git_repo() {
         // Create a temp git repo
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
@@ -409,15 +421,10 @@ mod tests {
             return; // Skip test if git is not available
         }
 
-        // Change to the git repo directory
-        let original_dir = std::env::current_dir().expect("Failed to get current dir");
-        std::env::set_current_dir(temp_dir.path()).expect("Failed to change dir");
+        let _cwd_guard = CurrentDirGuard::enter(temp_dir.path());
 
         // get_repo_root should find the repo root
         let result = get_repo_root();
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
 
         assert!(result.is_ok(), "get_repo_root should succeed");
         let root = result.unwrap();
@@ -433,6 +440,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(cwd)]
     fn test_get_repo_root_finds_repo_from_subdirectory() {
         // Create a temp git repo
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
@@ -452,15 +460,10 @@ mod tests {
         let subdir = temp_dir.path().join("subdir");
         fs::create_dir(&subdir).expect("Failed to create subdir");
 
-        // Change to the subdirectory
-        let original_dir = std::env::current_dir().expect("Failed to get current dir");
-        std::env::set_current_dir(&subdir).expect("Failed to change dir");
+        let _cwd_guard = CurrentDirGuard::enter(&subdir);
 
         // get_repo_root should find the repo root from subdir
         let result = get_repo_root();
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
 
         assert!(result.is_ok(), "get_repo_root should succeed");
         let root = result.unwrap();

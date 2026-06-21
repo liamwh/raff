@@ -18,7 +18,7 @@
 //! let mut files = Vec::new();
 //!
 //! // Collect all Rust source files
-//! collect_all_rs(src_dir, &mut files)?;
+//! collect_all_rs(src_dir, &mut files, None)?;
 //!
 //! // Convert a file path to a namespace
 //! let namespace = relative_namespace(

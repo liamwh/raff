@@ -143,7 +143,7 @@ impl Rule for FileSizeRule {
         }
 
         // Sort by excess (largest first)
-        oversized_files.sort_by(|a, b| b.excess_bytes.cmp(&a.excess_bytes));
+        oversized_files.sort_by_key(|item| std::cmp::Reverse(item.excess_bytes));
 
         let mut all_files = Vec::new();
         file_utils::collect_all_rs(&config.path, &mut all_files, None)?;

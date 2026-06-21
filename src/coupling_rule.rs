@@ -348,7 +348,7 @@ impl CouplingRule {
                                     crate_name, &src_path, pkg_data,
                                 )?;
                             module_couplings
-                                .sort_by(|a, b| (b.ce_m + b.ca_m).cmp(&(a.ce_m + a.ca_m)));
+                                .sort_by_key(|item| std::cmp::Reverse(item.ce_m + item.ca_m));
                             current_crate_coupling.modules = module_couplings;
                         }
                     }
@@ -359,7 +359,7 @@ impl CouplingRule {
 
         full_report
             .crates
-            .sort_by(|a, b| (b.ce + b.ca).cmp(&(a.ce + a.ca)));
+            .sort_by_key(|item| std::cmp::Reverse(item.ce + item.ca));
 
         Ok(full_report)
     }
