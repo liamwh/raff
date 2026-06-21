@@ -99,14 +99,14 @@ use std::process::Command;
 use syn::{ExprPath, Item, ItemMod, ItemUse, PatType, visit::Visit};
 use walkdir::WalkDir;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct CargoMetadata {
     packages: Vec<Package>,
     workspace_members: Vec<String>,
     resolve: Option<Resolve>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct Package {
     id: String,
     name: String,
@@ -118,23 +118,23 @@ struct Package {
 #[allow(dead_code)]
 struct PkgId(String);
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct Dependency {
     name: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct Resolve {
     nodes: Vec<ResolveNode>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct ResolveNode {
     id: String,
     dependencies: Vec<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct CrateLevelAnalysisResult {
     crate_couplings_map: HashMap<String, CrateCoupling>,
     workspace_packages_map: HashMap<String, Package>,
@@ -310,12 +310,23 @@ impl CouplingRule {
         let workspace_packages_map = analysis_result.workspace_packages_map;
         let package_id_to_name = analysis_result.package_id_to_name;
         let workspace_member_ids = analysis_result.workspace_member_ids;
+        let affected_crates = if args.staged {
+            Some(self.detect_affected_crates(&workspace_packages_map)?)
+        } else {
+            None
+        };
 
         let mut full_report = CouplingData {
             crates: Vec::new(),
             granularity: args.granularity.clone(),
             analysis_path: args.path.clone(),
         };
+
+        if let Some(affected_crates) = affected_crates.as_ref()
+            && affected_crates.is_empty()
+        {
+            return Ok(full_report);
+        }
 
         let mut sorted_workspace_pkg_ids: Vec<_> = workspace_member_ids.iter().cloned().collect();
         sorted_workspace_pkg_ids
@@ -324,6 +335,11 @@ impl CouplingRule {
         for pkg_id in sorted_workspace_pkg_ids {
             if let Some(pkg_data) = workspace_packages_map.get(&pkg_id) {
                 let crate_name = &pkg_data.name;
+                if let Some(affected_crates) = affected_crates.as_ref()
+                    && !affected_crates.contains(crate_name)
+                {
+                    continue;
+                }
                 let mut current_crate_coupling = crate_couplings_map
                     .get(crate_name)
                     .cloned()
@@ -401,6 +417,8 @@ impl CouplingRule {
             .arg("metadata")
             .arg("--format-version")
             .arg("1")
+            .arg("--locked")
+            .arg("--no-deps")
             .current_dir(analysis_path)
             .output()?;
         if !metadata_output.status.success() {
@@ -481,8 +499,8 @@ impl CouplingRule {
                 }
             }
         } else {
-            eprintln!(
-                "Warning: 'resolve' graph not found in cargo metadata. Crate coupling might be inaccurate using fallback."
+            tracing::debug!(
+                "cargo metadata did not include a resolve graph; using dependency-list fallback"
             );
             let workspace_package_names_to_ids: HashMap<String, String> = workspace_packages_map
                 .values()
@@ -524,6 +542,35 @@ impl CouplingRule {
             package_id_to_name,
             workspace_member_ids,
         })
+    }
+
+    fn detect_affected_crates(
+        &self,
+        workspace_packages_map: &HashMap<String, Package>,
+    ) -> Result<HashSet<String>> {
+        let staged_files = crate::git_utils::get_staged_files()?;
+        if staged_files.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        let mut affected = HashSet::new();
+        for package in workspace_packages_map.values() {
+            let manifest_path = PathBuf::from(&package.manifest_path);
+            let Some(package_dir) = manifest_path.parent() else {
+                continue;
+            };
+            let canonical_package_dir = package_dir
+                .canonicalize()
+                .unwrap_or_else(|_| package_dir.to_path_buf());
+            if staged_files
+                .iter()
+                .any(|file| file.starts_with(&canonical_package_dir))
+            {
+                affected.insert(package.name.clone());
+            }
+        }
+
+        Ok(affected)
     }
 
     #[tracing::instrument(level = "debug", skip(self, _pkg_data), ret)]

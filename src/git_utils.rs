@@ -45,10 +45,16 @@ pub fn get_staged_files() -> Result<Vec<PathBuf>> {
     }
 
     let content = String::from_utf8_lossy(&output.stdout);
+    let repo_root = get_repo_root()?;
     let files: Vec<PathBuf> = content
         .lines()
         .filter(|line| !line.is_empty())
         .map(PathBuf::from)
+        .map(|path| match (&repo_root, path.is_absolute()) {
+            (_, true) => path,
+            (Some(root), false) => root.join(path),
+            (None, false) => path,
+        })
         .collect();
 
     tracing::debug!("Found {} staged files", files.len());
@@ -377,8 +383,8 @@ mod tests {
         );
         assert_eq!(
             files[0],
-            PathBuf::from("test.rs"),
-            "get_staged_files should return the correct file name"
+            temp_dir.path().join("test.rs"),
+            "get_staged_files should return an absolute path under the repo root"
         );
     }
 

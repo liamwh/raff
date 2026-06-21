@@ -252,16 +252,24 @@ impl StatementCountRule {
         let threshold = args.threshold;
         let analysis_path = &args.path;
 
-        // Create cache key from analysis path and threshold
-        let cache_manager = CacheManager::new()?;
         let cache_key = CacheKey::new(
             format!("statement_count:{}", analysis_path.display()),
             None, // No git state for statement count
-            vec![("threshold".to_string(), threshold.to_string())],
+            vec![
+                ("threshold".to_string(), threshold.to_string()),
+                ("staged".to_string(), args.staged.to_string()),
+            ],
         );
+        let cache_manager = if args.staged {
+            None
+        } else {
+            Some(CacheManager::new()?)
+        };
 
-        // Try to get cached result
-        if let Some(cached_entry) = cache_manager.get(&cache_key)? {
+        // Try to get cached result for full-repo analysis only.
+        if let Some(cache_manager) = cache_manager.as_ref()
+            && let Some(cached_entry) = cache_manager.get(&cache_key)?
+        {
             tracing::info!("Using cached statement count analysis result");
             let cached_data: StatementCountData = bincode::deserialize(&cached_entry.data)
                 .map_err(|e| {
@@ -352,8 +360,10 @@ impl StatementCountRule {
                 e
             ))
         })?;
-        let cache_entry = CacheEntry::new(serialized_data);
-        cache_manager.put(&cache_key, cache_entry)?;
+        if let Some(cache_manager) = cache_manager {
+            let cache_entry = CacheEntry::new(serialized_data);
+            cache_manager.put(&cache_key, cache_entry)?;
+        }
 
         Ok(result)
     }
