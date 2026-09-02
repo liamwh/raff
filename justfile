@@ -134,9 +134,12 @@ install:
     #!/bin/bash
     set -euo pipefail
     BIN_DIR="$HOME/bin"
+    TARGET_DIR="$(cargo metadata --no-deps --format-version=1 | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)"
     mkdir -p "$BIN_DIR"
     echo "🔨 Building raff..."
     cargo build --locked --release
     echo "📦 Installing raff to $BIN_DIR..."
-    install -m 0755 target/release/raff "$BIN_DIR/raff"
+    rm -f "$BIN_DIR/raff"
+    cp "$TARGET_DIR/release/raff" "$BIN_DIR/raff"
+    chmod 0755 "$BIN_DIR/raff"
     echo "✅ raff installed to $BIN_DIR/raff"
