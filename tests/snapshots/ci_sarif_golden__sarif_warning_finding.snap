@@ -10,12 +10,12 @@ expression: json
       "tool": {
         "driver": {
           "name": "raff",
-          "version": "0.1.4",
+          "version": "[version]",
           "rules": [
             {
               "id": "volatility",
               "name": "Volatility Rule",
-              "helpUri": "https://github.com/liamwh/raff/docs/volatility"
+              "helpUri": "https://github.com/liamwh/raff#volatility"
             }
           ]
         }

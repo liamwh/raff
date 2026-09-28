@@ -13,6 +13,7 @@
 //! Raff is organized into several modules:
 //!
 //! - [`cli`] - Command-line argument parsing and configuration
+//! - [`cargo_workspace`] - Shared `cargo metadata` access and workspace member ownership
 //! - [`config`] - Configuration file loading and management
 //! - [`error`] - Centralized error types for the crate
 //! - [`counter`] - AST statement counting utilities
@@ -69,6 +70,7 @@
 // Module declarations
 pub mod all_rules;
 pub mod cache;
+pub mod cargo_workspace;
 pub mod ci_report;
 pub mod cli;
 pub mod cli_report;
@@ -104,9 +106,9 @@ pub use crate::volatility_rule::VolatilityRule;
 
 // Config exports
 pub use crate::config::{
-    ContributorReportConfig, CouplingConfig, GeneralConfig, PreCommitProfile, PreCommitSettings,
-    ProfileConfig, RaffConfig, RustCodeAnalysisConfig, StatementCountConfig, VolatilityConfig,
-    apply_pre_commit_profile, load_config, load_config_from_path, merge_all_args,
+    ContributorReportConfig, CouplingConfig, ExplicitCliArgs, GeneralConfig, PreCommitProfile,
+    PreCommitSettings, ProfileConfig, RaffConfig, RustCodeAnalysisConfig, StatementCountConfig,
+    VolatilityConfig, apply_pre_commit_profile, load_config, load_config_from_path, merge_all_args,
     merge_contributor_report_args, merge_coupling_args, merge_rust_code_analysis_args,
     merge_statement_count_args, merge_volatility_args,
 };

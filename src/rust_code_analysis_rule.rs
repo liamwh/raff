@@ -275,9 +275,7 @@ impl ToFindings for RustCodeAnalysisData {
                         aggregated.sloc, cyclomatic_avg, aggregated.halstead_volume
                     ),
                     location: Some(Location::new(relative_path)),
-                    help_uri: Some(
-                        "https://github.com/liamwh/raff/docs/rust-code-analysis".to_string(),
-                    ),
+                    help_uri: Some("https://github.com/liamwh/raff#rust-code-analysis".to_string()),
                     fingerprint: Some(format!(
                         "rust-code-analysis:{}:{}:{}",
                         unit.name, aggregated.sloc, aggregated.halstead_volume
@@ -441,14 +439,11 @@ impl RustCodeAnalysisRule {
 
         let output = command.output().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                RaffError::analysis_error(
-                    "rust_code_analysis",
-                    "rust-code-analysis-cli not found. Please ensure it is installed and in your PATH."
-                )
+                RaffError::tool_not_found("rust-code-analysis-cli")
             } else {
                 RaffError::analysis_error(
                     "rust_code_analysis",
-                    format!("Failed to execute rust-code-analysis-cli: {}", e)
+                    format!("Failed to execute rust-code-analysis-cli: {}", e),
                 )
             }
         })?;

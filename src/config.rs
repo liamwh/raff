@@ -5,7 +5,9 @@
 //! over config file values.
 
 use crate::error::Result;
+use clap::parser::ValueSource;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -113,7 +115,7 @@ pub struct VolatilityConfig {
     /// Default path for volatility analysis.
     pub path: Option<PathBuf>,
 
-    /// Weighting factor for lines changed (churn) vs. commit touch count.
+    /// Weight applied to lines changed (churn) relative to commit touches: raw score = touches + alpha * churn.
     #[serde(default = "default_volatility_alpha")]
     pub alpha: f64,
 
@@ -250,7 +252,7 @@ pub struct ProfileConfig {
 #[serde(deny_unknown_fields)]
 #[derive(Default)]
 pub struct PreCommitProfile {
-    /// Run only fast rules (statement-count, coupling).
+    /// Run only fast rules: statement count and coupling, or coupling alone when `staged`.
     #[serde(default)]
     pub fast: Option<bool>,
 
@@ -262,7 +264,8 @@ pub struct PreCommitProfile {
     #[serde(default)]
     pub quiet: Option<bool>,
 
-    /// Statement count threshold (more lenient for pre-commit).
+    /// Statement count threshold. Unused while `fast` and `staged` are set, as the
+    /// profile then skips statement count.
     #[serde(default)]
     pub sc_threshold: Option<usize>,
 }
@@ -290,7 +293,7 @@ fn default_contributor_decay() -> f64 {
 pub struct PreCommitSettings {
     /// The modified configuration with profile settings applied.
     pub config: RaffConfig,
-    /// Run only fast rules (statement-count, coupling).
+    /// Run only fast rules: statement count and coupling, or coupling alone when `staged`.
     pub fast: bool,
     /// Analyze only git-staged files.
     pub staged: bool,
@@ -435,48 +438,66 @@ pub fn load_config(config_path: Option<&Path>) -> Result<Option<(PathBuf, RaffCo
     }
 }
 
-/// Get the path from config if set, otherwise return the default.
-pub fn resolve_path(config_path: &Option<PathBuf>, default: &PathBuf) -> PathBuf {
-    config_path.as_ref().unwrap_or(default).clone()
+/// The subcommand arguments the user passed on the command line.
+///
+/// Merging uses this to tell an explicitly passed value apart from a clap default,
+/// even when both are equal (e.g. `--threshold 10`).
+#[derive(Debug, Default, Clone)]
+pub struct ExplicitCliArgs(HashSet<String>);
+
+impl ExplicitCliArgs {
+    /// Collects the arguments of the invoked subcommand (or of `matches` itself when
+    /// there is none) whose value did not come from a clap default.
+    pub fn from_matches(matches: &clap::ArgMatches) -> Self {
+        let matches = matches.subcommand().map_or(matches, |(_, sub)| sub);
+        Self(
+            matches
+                .ids()
+                .filter(|id| {
+                    matches
+                        .value_source(id.as_str())
+                        .is_some_and(|source| source != ValueSource::DefaultValue)
+                })
+                .map(|id| id.as_str().to_owned())
+                .collect(),
+        )
+    }
+
+    /// Whether the argument with the given clap id was passed explicitly.
+    pub fn contains(&self, id: &str) -> bool {
+        self.0.contains(id)
+    }
 }
 
 /// Merge statement count CLI args with config file values.
 ///
 /// Priority order:
-/// 1. CLI arguments (highest priority)
+/// 1. CLI arguments passed explicitly (highest priority)
 /// 2. Config file values
 /// 3. Default values (lowest priority)
 pub fn merge_statement_count_args(
     cli_args: &crate::cli::StatementCountArgs,
     config: &RaffConfig,
+    explicit: &ExplicitCliArgs,
 ) -> crate::cli::StatementCountArgs {
     let mut merged = cli_args.clone();
 
-    // Merge path: CLI arg OR config path OR default "."
-    // (CLI arg already has "." as default, so we only override if config has a path)
-    // But we need to check if CLI is using the default "." vs explicitly set
-    // Since clap doesn't distinguish, we check if config has a path and CLI is default "."
-    if config.statement_count.path.is_some() && merged.path.as_os_str() == "." {
-        merged.path = resolve_path(&config.statement_count.path, &PathBuf::from("."));
+    if !explicit.contains("path")
+        && let Some(config_path) = &config.statement_count.path
+    {
+        merged.path = config_path.clone();
     }
 
-    // Merge threshold: CLI arg OR config threshold OR default 10
-    // The CLI default is 10, which matches StatementCountConfig default
-    // We only override if the config has a non-default threshold
-    if config.statement_count.threshold != 10 {
-        // Check if CLI is using default - we need to know if user explicitly set it
-        // Since we can't distinguish, we'll use config only when CLI arg wasn't explicitly provided
-        // Actually, we can't detect this - so we'll use config when config threshold != default
+    // The config default equals the CLI default, so the config value always applies.
+    if !explicit.contains("threshold") {
         merged.threshold = config.statement_count.threshold;
     }
 
-    // Merge output: CLI arg OR config output OR default Table
-    if let Some(config_output) = &config.statement_count.output {
-        // Only use config output if CLI is using default (Table)
-        if matches!(merged.output, crate::cli::StatementCountOutputFormat::Table) {
-            merged.output = parse_statement_count_output_format(config_output)
-                .unwrap_or(crate::cli::StatementCountOutputFormat::Table);
-        }
+    if !explicit.contains("output")
+        && let Some(config_output) = &config.statement_count.output
+    {
+        merged.output = parse_statement_count_output_format(config_output)
+            .unwrap_or(crate::cli::StatementCountOutputFormat::Table);
     }
 
     // Merge output_file: CLI arg OR general config output_file
@@ -500,16 +521,18 @@ fn parse_statement_count_output_format(s: &str) -> Option<crate::cli::StatementC
 pub fn merge_volatility_args(
     cli_args: &crate::cli::VolatilityArgs,
     config: &RaffConfig,
+    explicit: &ExplicitCliArgs,
 ) -> crate::cli::VolatilityArgs {
     let mut merged = cli_args.clone();
 
-    // Merge path
-    if config.volatility.path.is_some() && merged.path.as_os_str() == "." {
-        merged.path = resolve_path(&config.volatility.path, &PathBuf::from("."));
+    if !explicit.contains("path")
+        && let Some(config_path) = &config.volatility.path
+    {
+        merged.path = config_path.clone();
     }
 
-    // Merge alpha: CLI default is 0.01, same as config default
-    if config.volatility.alpha != 0.01 {
+    // The config default equals the CLI default, so the config value always applies.
+    if !explicit.contains("alpha") {
         merged.alpha = config.volatility.alpha;
     }
 
@@ -528,9 +551,8 @@ pub fn merge_volatility_args(
         merged.skip_merges = true;
     }
 
-    // Merge output: CLI default is Table
-    if let Some(config_output) = &config.volatility.output
-        && matches!(merged.output, crate::cli::VolatilityOutputFormat::Table)
+    if !explicit.contains("output")
+        && let Some(config_output) = &config.volatility.output
     {
         merged.output = parse_volatility_output_format(config_output)
             .unwrap_or(crate::cli::VolatilityOutputFormat::Table);
@@ -560,25 +582,25 @@ fn parse_volatility_output_format(s: &str) -> Option<crate::cli::VolatilityOutpu
 pub fn merge_coupling_args(
     cli_args: &crate::cli::CouplingArgs,
     config: &RaffConfig,
+    explicit: &ExplicitCliArgs,
 ) -> crate::cli::CouplingArgs {
     let mut merged = cli_args.clone();
 
-    // Merge path
-    if config.coupling.path.is_some() && merged.path.as_os_str() == "." {
-        merged.path = resolve_path(&config.coupling.path, &PathBuf::from("."));
+    if !explicit.contains("path")
+        && let Some(config_path) = &config.coupling.path
+    {
+        merged.path = config_path.clone();
     }
 
-    // Merge output: CLI default is Table
-    if let Some(config_output) = &config.coupling.output
-        && matches!(merged.output, crate::cli::CouplingOutputFormat::Table)
+    if !explicit.contains("output")
+        && let Some(config_output) = &config.coupling.output
     {
         merged.output = parse_coupling_output_format(config_output)
             .unwrap_or(crate::cli::CouplingOutputFormat::Table);
     }
 
-    // Merge granularity: CLI default is Both
-    if let Some(config_granularity) = &config.coupling.granularity
-        && matches!(merged.granularity, crate::cli::CouplingGranularity::Both)
+    if !explicit.contains("granularity")
+        && let Some(config_granularity) = &config.coupling.granularity
     {
         merged.granularity = parse_coupling_granularity(config_granularity)
             .unwrap_or(crate::cli::CouplingGranularity::Both);
@@ -618,12 +640,14 @@ fn parse_coupling_granularity(s: &str) -> Option<crate::cli::CouplingGranularity
 pub fn merge_rust_code_analysis_args(
     cli_args: &crate::cli::RustCodeAnalysisArgs,
     config: &RaffConfig,
+    explicit: &ExplicitCliArgs,
 ) -> crate::cli::RustCodeAnalysisArgs {
     let mut merged = cli_args.clone();
 
-    // Merge path
-    if config.rust_code_analysis.path.is_some() && merged.path.as_os_str() == "." {
-        merged.path = resolve_path(&config.rust_code_analysis.path, &PathBuf::from("."));
+    if !explicit.contains("path")
+        && let Some(config_path) = &config.rust_code_analysis.path
+    {
+        merged.path = config_path.clone();
     }
 
     // Merge extra_flags: CLI flags should append to config, not replace
@@ -633,30 +657,24 @@ pub fn merge_rust_code_analysis_args(
         merged.extra_flags = combined_flags;
     }
 
-    // Merge jobs: CLI default is num_cpus::get(), config is None
-    if let Some(config_jobs) = config.rust_code_analysis.jobs {
+    if !explicit.contains("jobs")
+        && let Some(config_jobs) = config.rust_code_analysis.jobs
+    {
         merged.jobs = config_jobs;
     }
 
-    // Merge output: CLI default is Table
-    if let Some(config_output) = &config.rust_code_analysis.output
-        && matches!(
-            merged.output,
-            crate::cli::RustCodeAnalysisOutputFormat::Table
-        )
+    if !explicit.contains("output")
+        && let Some(config_output) = &config.rust_code_analysis.output
     {
         merged.output = parse_rca_output_format(config_output)
             .unwrap_or(crate::cli::RustCodeAnalysisOutputFormat::Table);
     }
 
-    // Merge metrics: CLI default is true
-    // If config has false and CLI is default true, use config
-    if !config.rust_code_analysis.metrics && merged.metrics {
-        merged.metrics = false;
+    // The config defaults equal the CLI defaults, so the config values always apply.
+    if !explicit.contains("metrics") {
+        merged.metrics = config.rust_code_analysis.metrics;
     }
-
-    // Merge language: CLI default is "rust"
-    if merged.language == "rust" && config.rust_code_analysis.language != "rust" {
+    if !explicit.contains("language") {
         merged.language = config.rust_code_analysis.language.clone();
     }
 
@@ -683,12 +701,14 @@ fn parse_rca_output_format(s: &str) -> Option<crate::cli::RustCodeAnalysisOutput
 pub fn merge_contributor_report_args(
     cli_args: &crate::cli::ContributorReportArgs,
     config: &RaffConfig,
+    explicit: &ExplicitCliArgs,
 ) -> crate::cli::ContributorReportArgs {
     let mut merged = cli_args.clone();
 
-    // Merge path
-    if config.contributor_report.path.is_some() && merged.path.as_os_str() == "." {
-        merged.path = resolve_path(&config.contributor_report.path, &PathBuf::from("."));
+    if !explicit.contains("path")
+        && let Some(config_path) = &config.contributor_report.path
+    {
+        merged.path = config_path.clone();
     }
 
     // Merge since: optional
@@ -696,17 +716,13 @@ pub fn merge_contributor_report_args(
         merged.since = config.contributor_report.since.clone();
     }
 
-    // Merge decay: CLI default is 0.01, same as config default
-    if config.contributor_report.decay != 0.01 {
+    // The config default equals the CLI default, so the config value always applies.
+    if !explicit.contains("decay") {
         merged.decay = config.contributor_report.decay;
     }
 
-    // Merge output: CLI default is Table
-    if let Some(config_output) = &config.contributor_report.output
-        && matches!(
-            merged.output,
-            crate::cli::ContributorReportOutputFormat::Table
-        )
+    if !explicit.contains("output")
+        && let Some(config_output) = &config.contributor_report.output
     {
         merged.output = parse_contributor_report_output_format(config_output)
             .unwrap_or(crate::cli::ContributorReportOutputFormat::Table);
@@ -736,11 +752,14 @@ fn parse_contributor_report_output_format(
 /// Merge all-rules CLI args with config file values.
 ///
 /// This merges into each sub-command's config section.
-pub fn merge_all_args(cli_args: &crate::cli::AllArgs, config: &RaffConfig) -> crate::cli::AllArgs {
+pub fn merge_all_args(
+    cli_args: &crate::cli::AllArgs,
+    config: &RaffConfig,
+    explicit: &ExplicitCliArgs,
+) -> crate::cli::AllArgs {
     let mut merged = cli_args.clone();
 
-    // Merge path
-    if merged.path.as_os_str() == "." {
+    if !explicit.contains("path") {
         // Check all config paths, use general path as fallback
         let config_path = config
             .general
@@ -756,13 +775,12 @@ pub fn merge_all_args(cli_args: &crate::cli::AllArgs, config: &RaffConfig) -> cr
         }
     }
 
-    // Merge statement count threshold
-    if config.statement_count.threshold != 10 {
+    // Config defaults equal the CLI defaults, so config values always apply to
+    // arguments that were not passed explicitly.
+    if !explicit.contains("sc_threshold") {
         merged.sc_threshold = config.statement_count.threshold;
     }
-
-    // Merge volatility alpha
-    if config.volatility.alpha != 0.01 {
+    if !explicit.contains("vol_alpha") {
         merged.vol_alpha = config.volatility.alpha;
     }
 
@@ -781,12 +799,8 @@ pub fn merge_all_args(cli_args: &crate::cli::AllArgs, config: &RaffConfig) -> cr
         merged.vol_skip_merges = true;
     }
 
-    // Merge coupling granularity
-    if let Some(config_granularity) = &config.coupling.granularity
-        && matches!(
-            merged.coup_granularity,
-            crate::cli::CouplingGranularity::Both
-        )
+    if !explicit.contains("coup_granularity")
+        && let Some(config_granularity) = &config.coupling.granularity
     {
         merged.coup_granularity = parse_coupling_granularity(config_granularity)
             .unwrap_or(crate::cli::CouplingGranularity::Both);
@@ -799,18 +813,15 @@ pub fn merge_all_args(cli_args: &crate::cli::AllArgs, config: &RaffConfig) -> cr
         merged.rca_extra_flags = combined_flags;
     }
 
-    // Merge RCA jobs
-    if let Some(config_jobs) = config.rust_code_analysis.jobs {
+    if !explicit.contains("rca_jobs")
+        && let Some(config_jobs) = config.rust_code_analysis.jobs
+    {
         merged.rca_jobs = config_jobs;
     }
-
-    // Merge RCA metrics
-    if !config.rust_code_analysis.metrics && merged.rca_metrics {
-        merged.rca_metrics = false;
+    if !explicit.contains("rca_metrics") {
+        merged.rca_metrics = config.rust_code_analysis.metrics;
     }
-
-    // Merge RCA language
-    if merged.rca_language == "rust" && config.rust_code_analysis.language != "rust" {
+    if !explicit.contains("rca_language") {
         merged.rca_language = config.rust_code_analysis.language.clone();
     }
 
@@ -1226,26 +1237,61 @@ verbose = true
 
     // Tests for merge functions
 
-    #[test]
-    fn test_merge_statement_count_args_with_default_config() {
-        let config = RaffConfig::default();
-        let cli_args = crate::cli::StatementCountArgs {
-            path: PathBuf::from("."),
-            threshold: 10,
-            output: crate::cli::StatementCountOutputFormat::Table,
-            ci_output: None,
-            output_file: None,
-            staged: false,
+    /// Parses `argv` exactly as the binary does and returns the subcommand args
+    /// together with the arguments passed explicitly.
+    fn parse_cli(argv: &[&str]) -> (crate::cli::Commands, ExplicitCliArgs) {
+        use clap::{CommandFactory, FromArgMatches};
+        let matches = crate::cli::Cli::command()
+            .try_get_matches_from(argv)
+            .expect("argv should parse");
+        let cli = crate::cli::Cli::from_arg_matches(&matches).expect("matches should convert");
+        (cli.command, ExplicitCliArgs::from_matches(&matches))
+    }
+
+    fn merged_statement_count(
+        argv: &[&str],
+        config: &RaffConfig,
+    ) -> crate::cli::StatementCountArgs {
+        let (crate::cli::Commands::StatementCount(args), explicit) = parse_cli(argv) else {
+            panic!("expected statement-count");
         };
+        merge_statement_count_args(&args, config, &explicit)
+    }
 
-        let merged = merge_statement_count_args(&cli_args, &config);
+    fn merged_volatility(argv: &[&str], config: &RaffConfig) -> crate::cli::VolatilityArgs {
+        let (crate::cli::Commands::Volatility(args), explicit) = parse_cli(argv) else {
+            panic!("expected volatility");
+        };
+        merge_volatility_args(&args, config, &explicit)
+    }
 
-        assert_eq!(merged.path, PathBuf::from("."));
-        assert_eq!(merged.threshold, 10);
-        assert!(matches!(
-            merged.output,
-            crate::cli::StatementCountOutputFormat::Table
-        ));
+    fn merged_all(argv: &[&str], config: &RaffConfig) -> crate::cli::AllArgs {
+        let (crate::cli::Commands::All(args), explicit) = parse_cli(argv) else {
+            panic!("expected all");
+        };
+        merge_all_args(&args, config, &explicit)
+    }
+
+    #[test]
+    fn test_merge_statement_count_threshold_precedence() {
+        let mut config = RaffConfig::default();
+        config.statement_count.threshold = 15;
+
+        let cli_beats_config =
+            merged_statement_count(&["raff", "statement-count", "--threshold", "100"], &config);
+        assert_eq!(cli_beats_config.threshold, 100);
+
+        let config_beats_default = merged_statement_count(&["raff", "statement-count"], &config);
+        assert_eq!(config_beats_default.threshold, 15);
+
+        let default_only =
+            merged_statement_count(&["raff", "statement-count"], &RaffConfig::default());
+        assert_eq!(default_only.threshold, 10);
+
+        // An explicit value equal to the built-in default still beats the config.
+        let explicit_default =
+            merged_statement_count(&["raff", "statement-count", "--threshold", "10"], &config);
+        assert_eq!(explicit_default.threshold, 10);
     }
 
     #[test]
@@ -1255,18 +1301,8 @@ verbose = true
         config.statement_count.path = Some(PathBuf::from("/custom/path"));
         config.statement_count.output = Some("html".to_string());
 
-        let cli_args = crate::cli::StatementCountArgs {
-            path: PathBuf::from("."),
-            threshold: 10,
-            output: crate::cli::StatementCountOutputFormat::Table,
-            ci_output: None,
-            output_file: None,
-            staged: false,
-        };
+        let merged = merged_statement_count(&["raff", "statement-count"], &config);
 
-        let merged = merge_statement_count_args(&cli_args, &config);
-
-        // Config path should be used when CLI path is default "."
         assert_eq!(merged.path, PathBuf::from("/custom/path"));
         assert_eq!(merged.threshold, 25);
         assert!(matches!(
@@ -1280,26 +1316,27 @@ verbose = true
         let mut config = RaffConfig::default();
         config.statement_count.threshold = 25;
         config.statement_count.path = Some(PathBuf::from("/custom/path"));
+        config.statement_count.output = Some("html".to_string());
 
-        let cli_args = crate::cli::StatementCountArgs {
-            path: PathBuf::from("/cli/path"),
-            threshold: 50,
-            output: crate::cli::StatementCountOutputFormat::Html,
-            ci_output: None,
-            output_file: None,
-            staged: false,
-        };
+        let merged = merged_statement_count(
+            &[
+                "raff",
+                "statement-count",
+                "--path",
+                ".",
+                "--threshold",
+                "50",
+                "--output",
+                "table",
+            ],
+            &config,
+        );
 
-        let merged = merge_statement_count_args(&cli_args, &config);
-
-        // CLI values should take precedence
-        assert_eq!(merged.path, PathBuf::from("/cli/path"));
-        // Note: threshold uses a heuristic - if config is non-default, it overrides
-        // This test documents the current behavior
-        assert_eq!(merged.threshold, 25); // Config overrides when CLI matches default
+        assert_eq!(merged.path, PathBuf::from("."));
+        assert_eq!(merged.threshold, 50);
         assert!(matches!(
             merged.output,
-            crate::cli::StatementCountOutputFormat::Html
+            crate::cli::StatementCountOutputFormat::Table
         ));
     }
 
@@ -1312,18 +1349,7 @@ verbose = true
         config.volatility.skip_merges = true;
         config.volatility.output = Some("csv".to_string());
 
-        let cli_args = crate::cli::VolatilityArgs {
-            path: PathBuf::from("."),
-            alpha: 0.01,
-            since: None,
-            normalize: false,
-            skip_merges: false,
-            output: crate::cli::VolatilityOutputFormat::Table,
-            ci_output: None,
-            output_file: None,
-        };
-
-        let merged = merge_volatility_args(&cli_args, &config);
+        let merged = merged_volatility(&["raff", "volatility"], &config);
 
         assert_eq!(merged.alpha, 0.05);
         assert_eq!(merged.since, Some("2024-01-01".to_string()));
@@ -1340,53 +1366,46 @@ verbose = true
         let mut config = RaffConfig::default();
         config.volatility.alpha = 0.05;
         config.volatility.since = Some("2024-01-01".to_string());
+        config.volatility.output = Some("csv".to_string());
 
-        let cli_args = crate::cli::VolatilityArgs {
-            path: PathBuf::from("."),
-            alpha: 0.1,
-            since: Some("2023-01-01".to_string()),
-            normalize: false,
-            skip_merges: false,
-            output: crate::cli::VolatilityOutputFormat::Json,
-            ci_output: None,
-            output_file: None,
-        };
+        let merged = merged_volatility(
+            &[
+                "raff",
+                "volatility",
+                "--alpha",
+                "0.01",
+                "--since",
+                "2023-01-01",
+                "--output",
+                "table",
+            ],
+            &config,
+        );
 
-        let merged = merge_volatility_args(&cli_args, &config);
-
-        // Note: The current merge heuristic has a limitation - it can't detect if CLI args
-        // were explicitly provided. For numeric values, if config has a non-default value,
-        // it overrides CLI. For optional values (like 'since'), CLI takes precedence when set.
-        // This is documented behavior; improving this would require clap's Id to detect
-        // explicitly provided flags.
-        assert_eq!(merged.alpha, 0.05); // Config overrides because it's non-default
-        assert_eq!(merged.since, Some("2023-01-01".to_string())); // CLI takes precedence for Option
+        assert_eq!(merged.alpha, 0.01);
+        assert_eq!(merged.since, Some("2023-01-01".to_string()));
         assert!(matches!(
             merged.output,
-            crate::cli::VolatilityOutputFormat::Json
+            crate::cli::VolatilityOutputFormat::Table
         ));
     }
 
     #[test]
-    fn test_merge_coupling_args_with_config_values() {
+    fn test_merge_coupling_args_cli_granularity_overrides_config() {
         let mut config = RaffConfig::default();
         config.coupling.granularity = Some("module".to_string());
         config.coupling.output = Some("json".to_string());
-
-        let cli_args = crate::cli::CouplingArgs {
-            path: PathBuf::from("."),
-            output: crate::cli::CouplingOutputFormat::Table,
-            granularity: crate::cli::CouplingGranularity::Both,
-            ci_output: None,
-            output_file: None,
-            staged: false,
+        let (crate::cli::Commands::Coupling(args), explicit) =
+            parse_cli(&["raff", "coupling", "--granularity", "both"])
+        else {
+            panic!("expected coupling");
         };
 
-        let merged = merge_coupling_args(&cli_args, &config);
+        let merged = merge_coupling_args(&args, &config, &explicit);
 
         assert!(matches!(
             merged.granularity,
-            crate::cli::CouplingGranularity::Module
+            crate::cli::CouplingGranularity::Both
         ));
         assert!(matches!(
             merged.output,
@@ -1401,23 +1420,22 @@ verbose = true
         config.rust_code_analysis.jobs = Some(4);
         config.rust_code_analysis.metrics = false;
         config.rust_code_analysis.language = "python".to_string();
-
-        let cli_args = crate::cli::RustCodeAnalysisArgs {
-            path: PathBuf::from("."),
-            extra_flags: vec!["--cli-flag".to_string()],
-            jobs: num_cpus::get(),
-            output: crate::cli::RustCodeAnalysisOutputFormat::Table,
-            metrics: true,
-            language: "rust".to_string(),
-            ci_output: None,
-            output_file: None,
+        let (crate::cli::Commands::RustCodeAnalysis(args), explicit) = parse_cli(&[
+            "raff",
+            "rust-code-analysis",
+            "-f",
+            "cli-flag",
+            "--jobs",
+            "2",
+        ]) else {
+            panic!("expected rust-code-analysis");
         };
 
-        let merged = merge_rust_code_analysis_args(&cli_args, &config);
+        let merged = merge_rust_code_analysis_args(&args, &config, &explicit);
 
-        // Config flags should come first, then CLI flags
-        assert_eq!(merged.extra_flags, vec!["--flag1", "--flag2", "--cli-flag"]);
-        assert_eq!(merged.jobs, 4);
+        // Config flags come first, then CLI flags
+        assert_eq!(merged.extra_flags, vec!["--flag1", "--flag2", "cli-flag"]);
+        assert_eq!(merged.jobs, 2);
         assert!(!merged.metrics);
         assert_eq!(merged.language, "python");
     }
@@ -1428,17 +1446,13 @@ verbose = true
         config.contributor_report.decay = 0.02;
         config.contributor_report.since = Some("2023-01-01".to_string());
         config.contributor_report.output = Some("html".to_string());
-
-        let cli_args = crate::cli::ContributorReportArgs {
-            path: PathBuf::from("."),
-            since: None,
-            decay: 0.01,
-            output: crate::cli::ContributorReportOutputFormat::Table,
-            ci_output: None,
-            output_file: None,
+        let (crate::cli::Commands::ContributorReport(args), explicit) =
+            parse_cli(&["raff", "contributor-report"])
+        else {
+            panic!("expected contributor-report");
         };
 
-        let merged = merge_contributor_report_args(&cli_args, &config);
+        let merged = merge_contributor_report_args(&args, &config, &explicit);
 
         assert_eq!(merged.decay, 0.02);
         assert_eq!(merged.since, Some("2023-01-01".to_string()));
@@ -1458,28 +1472,7 @@ verbose = true
         config.coupling.granularity = Some("crate".to_string());
         config.rust_code_analysis.extra_flags = vec!["--rca-flag".to_string()];
 
-        let cli_args = crate::cli::AllArgs {
-            path: PathBuf::from("."),
-            output: crate::cli::AllOutputFormat::Html,
-            fast: false,
-            quiet: false,
-            fail_on_warnings: false,
-            sc_threshold: 10,
-            vol_alpha: 0.01,
-            vol_since: None,
-            vol_normalize: false,
-            vol_skip_merges: false,
-            coup_granularity: crate::cli::CouplingGranularity::Both,
-            rca_extra_flags: vec![],
-            rca_jobs: num_cpus::get(),
-            rca_metrics: true,
-            rca_language: "rust".to_string(),
-            ci_output: None,
-            output_file: None,
-            staged: false,
-        };
-
-        let merged = merge_all_args(&cli_args, &config);
+        let merged = merged_all(&["raff", "all"], &config);
 
         assert_eq!(merged.path, PathBuf::from("/general/path"));
         assert_eq!(merged.sc_threshold, 30);
@@ -1490,6 +1483,28 @@ verbose = true
             crate::cli::CouplingGranularity::Crate
         ));
         assert_eq!(merged.rca_extra_flags, vec!["--rca-flag"]);
+    }
+
+    #[test]
+    fn test_merge_all_args_cli_overrides_config() {
+        let mut config = RaffConfig::default();
+        config.statement_count.threshold = 15;
+        config.volatility.alpha = 0.03;
+
+        let merged = merged_all(
+            &[
+                "raff",
+                "all",
+                "--sc-threshold",
+                "100",
+                "--vol-alpha",
+                "0.01",
+            ],
+            &config,
+        );
+
+        assert_eq!(merged.sc_threshold, 100);
+        assert_eq!(merged.vol_alpha, 0.01);
     }
 
     #[test]

@@ -10,12 +10,12 @@ expression: json
       "tool": {
         "driver": {
           "name": "raff",
-          "version": "0.1.4",
+          "version": "[version]",
           "rules": [
             {
               "id": "rust-code-analysis",
               "name": "Rust Code Analysis",
-              "helpUri": "https://github.com/liamwh/raff/docs/rust-code-analysis"
+              "helpUri": "https://github.com/liamwh/raff#rust-code-analysis"
             }
           ]
         }

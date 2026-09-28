@@ -16,18 +16,17 @@ granularity = "module"
 
 # Volatility Rule Configuration (skipped in fast mode)
 [volatility]
-# Weighting factor: 0.01 = focus on commit touch count, 0.99 = focus on lines changed
+# Churn weight: raw score = commit touches + alpha * (lines added + deleted).
+# Small values (0.01) focus on commit touch count; larger values weight lines changed more.
 alpha = 0.01
 # Skip merge commits in volatility analysis
 skip_merges = true
 
 # Pre-commit profile for use with pre-commit hooks
 [profile.pre_commit]
-# Run only fast rules (statement-count, coupling)
+# Run only fast rules; with staged files that is the coupling SDP check alone
 fast = true
-# Analyze only git-staged files
+# Analyse only git-staged files
 staged = true
 # Minimal output (summary line only)
 quiet = true
-# More lenient threshold for pre-commit (25% vs 15% default)
-sc_threshold = 25

@@ -10,22 +10,22 @@ expression: json
       "tool": {
         "driver": {
           "name": "raff",
-          "version": "0.1.4",
+          "version": "[version]",
           "rules": [
             {
               "id": "coupling",
               "name": "Coupling Rule",
-              "helpUri": "https://github.com/liamwh/raff/docs/coupling"
+              "helpUri": "https://github.com/liamwh/raff#module-coupling"
             },
             {
               "id": "statement-count",
               "name": "Statement Count Rule",
-              "helpUri": "https://github.com/liamwh/raff/docs/statement-count"
+              "helpUri": "https://github.com/liamwh/raff#statement-count"
             },
             {
               "id": "volatility",
               "name": "Volatility Rule",
-              "helpUri": "https://github.com/liamwh/raff/docs/volatility"
+              "helpUri": "https://github.com/liamwh/raff#volatility"
             }
           ]
         }
@@ -64,10 +64,10 @@ expression: json
           "ruleId": "coupling",
           "level": "warning",
           "message": {
-            "text": "Crate 'api' has high instability: Ce=15, Ca=5, I=0.75"
+            "text": "Crate 'domain' (I=0.25) depends on less stable crate 'api' (I=0.75), violating the Stable Dependencies Principle"
           },
           "partialFingerprints": {
-            "primaryLocation": "coupling:api:15:5"
+            "primaryLocation": "coupling-sdp:domain:api"
           }
         }
       ]

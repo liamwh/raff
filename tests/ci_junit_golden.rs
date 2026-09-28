@@ -14,6 +14,35 @@ fn test_junit_empty() {
     insta::assert_snapshot!(xml);
 }
 
+/// CI systems reject malformed XML outright, so every severity must produce
+/// a well-formed document with one closed `<testcase>` per finding.
+#[test]
+fn test_junit_is_well_formed_for_every_severity() {
+    let finding = |severity, rule_id: &str| Finding {
+        rule_id: rule_id.to_string(),
+        rule_name: rule_id.to_string(),
+        severity,
+        message: format!("{rule_id} finding"),
+        location: None,
+        help_uri: Some("https://github.com/liamwh/raff#module-coupling".to_string()),
+        fingerprint: None,
+    };
+    let findings = vec![
+        finding(Severity::Error, "statement-count"),
+        finding(Severity::Warning, "coupling"),
+        finding(Severity::Note, "rust-code-analysis"),
+    ];
+
+    let xml = to_junit(&findings, "raff").expect("JUnit generation should succeed");
+    let doc = roxmltree::Document::parse(&xml)
+        .unwrap_or_else(|e| panic!("JUnit output must be well-formed XML: {e}\n{xml}"));
+    let testcases = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("testcase"))
+        .count();
+    assert_eq!(testcases, 3);
+}
+
 #[test]
 fn test_junit_single_error_finding() {
     let findings = vec![Finding {
@@ -23,7 +52,7 @@ fn test_junit_single_error_finding() {
         message: "Component 'src' has 5000 statements (25%), exceeding threshold of 20%"
             .to_string(),
         location: Some(Location::new("src/main.rs".to_string())),
-        help_uri: Some("https://github.com/liamwh/raff/docs/statement-count".to_string()),
+        help_uri: Some("https://github.com/liamwh/raff#statement-count".to_string()),
         fingerprint: Some("statement-count:src:20:5000".to_string()),
     }];
 
@@ -39,7 +68,7 @@ fn test_junit_warning_finding() {
         severity: Severity::Warning,
         message: "Crate 'my-crate' has high volatility: raw_score=0.85 (alpha=0.01)".to_string(),
         location: None,
-        help_uri: Some("https://github.com/liamwh/raff/docs/volatility".to_string()),
+        help_uri: Some("https://github.com/liamwh/raff#volatility".to_string()),
         fingerprint: Some("volatility:my-crate:0.01:0.85".to_string()),
     }];
 
@@ -74,7 +103,7 @@ fn test_junit_multiple_findings_same_rule() {
             message: "Component 'src' has 5000 statements (25%), exceeding threshold of 20%"
                 .to_string(),
             location: Some(Location::new("src/main.rs".to_string())),
-            help_uri: Some("https://github.com/liamwh/raff/docs/statement-count".to_string()),
+            help_uri: Some("https://github.com/liamwh/raff#statement-count".to_string()),
             fingerprint: Some("statement-count:src:20:5000".to_string()),
         },
         Finding {
@@ -84,7 +113,7 @@ fn test_junit_multiple_findings_same_rule() {
             message: "Component 'tests' has 3000 statements (15%), exceeding threshold of 10%"
                 .to_string(),
             location: Some(Location::new("tests/integration_test.rs".to_string())),
-            help_uri: Some("https://github.com/liamwh/raff/docs/statement-count".to_string()),
+            help_uri: Some("https://github.com/liamwh/raff#statement-count".to_string()),
             fingerprint: Some("statement-count:tests:10:3000".to_string()),
         },
     ];
@@ -103,7 +132,7 @@ fn test_junit_multiple_findings_different_rules() {
             message: "Component 'src' has 5000 statements (25%), exceeding threshold of 20%"
                 .to_string(),
             location: Some(Location::new("src/main.rs".to_string())),
-            help_uri: Some("https://github.com/liamwh/raff/docs/statement-count".to_string()),
+            help_uri: Some("https://github.com/liamwh/raff#statement-count".to_string()),
             fingerprint: Some("statement-count:src:20:5000".to_string()),
         },
         Finding {
@@ -113,17 +142,17 @@ fn test_junit_multiple_findings_different_rules() {
             message: "Crate 'my-crate' has high volatility: raw_score=0.85 (alpha=0.01)"
                 .to_string(),
             location: None,
-            help_uri: Some("https://github.com/liamwh/raff/docs/volatility".to_string()),
+            help_uri: Some("https://github.com/liamwh/raff#volatility".to_string()),
             fingerprint: Some("volatility:my-crate:0.01:0.85".to_string()),
         },
         Finding {
             rule_id: "coupling".to_string(),
             rule_name: "Coupling Rule".to_string(),
             severity: Severity::Warning,
-            message: "Crate 'api' has high instability: Ce=15, Ca=5, I=0.75".to_string(),
+            message: "Crate 'domain' (I=0.25) depends on less stable crate 'api' (I=0.75), violating the Stable Dependencies Principle".to_string(),
             location: None,
-            help_uri: Some("https://github.com/liamwh/raff/docs/coupling".to_string()),
-            fingerprint: Some("coupling:api:15:5".to_string()),
+            help_uri: Some("https://github.com/liamwh/raff#module-coupling".to_string()),
+            fingerprint: Some("coupling-sdp:domain:api".to_string()),
         },
     ];
 
@@ -140,7 +169,7 @@ fn test_junit_finding_with_line_range() {
         message: "Function 'process_data' has high cyclomatic complexity: 15 (threshold: 10)"
             .to_string(),
         location: Some(Location::with_lines("src/processor.rs".to_string(), 42, 89)),
-        help_uri: Some("https://github.com/liamwh/raff/docs/rust-code-analysis".to_string()),
+        help_uri: Some("https://github.com/liamwh/raff#rust-code-analysis".to_string()),
         fingerprint: Some("rca:process_data:15".to_string()),
     }];
 
@@ -158,7 +187,7 @@ fn test_junit_finding_with_special_characters() {
             "Component 'src/utils/helpers' has 1000 statements (10%), exceeding threshold of 5%"
                 .to_string(),
         location: Some(Location::new("src/utils/helpers.rs".to_string())),
-        help_uri: Some("https://github.com/liamwh/raff/docs/statement-count".to_string()),
+        help_uri: Some("https://github.com/liamwh/raff#statement-count".to_string()),
         fingerprint: Some("statement-count:src/utils/helpers:5:1000".to_string()),
     }];
 

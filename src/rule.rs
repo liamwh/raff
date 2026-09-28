@@ -121,7 +121,7 @@ pub trait Rule: Sized {
     ///
     /// # Errors
     ///
-    /// Returns a [`RaffError`] if:
+    /// Returns a [`RaffError`](crate::error::RaffError) if:
     /// - The analysis path does not exist
     /// - Required tools are not available
     /// - Analysis fails to complete
@@ -136,7 +136,7 @@ pub trait Rule: Sized {
     ///
     /// # Errors
     ///
-    /// Returns a [`RaffError`] if the analysis cannot be completed.
+    /// Returns a [`RaffError`](crate::error::RaffError) if the analysis cannot be completed.
     fn analyze(&self, config: &Self::Config) -> Result<Self::Data>;
 }
 

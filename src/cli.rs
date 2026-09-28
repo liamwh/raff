@@ -1,15 +1,15 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 
-/// Main CLI structure for `rust-ff`.
+/// Main CLI structure for `raff`.
 /// This structure will be augmented by subcommands provided by different rules.
 #[derive(Parser, Debug)]
 #[command(
-    name = "rust-ff",
-    bin_name = "aff",
+    name = "raff",
+    bin_name = "raff",
     about = "A collection of Rust code analysis tools and fitness functions.",
     version = env!("CARGO_PKG_VERSION"),
-    long_about = "rust-ff provides various rules to analyze Rust codebases, such as statement counting and volatility analysis. Use subcommands to select a rule."
+    long_about = "raff runs architectural fitness functions over Rust codebases: statement count, coupling, volatility, rust-code-analysis metrics and contributor reports. Use subcommands to select a rule."
 )]
 pub struct Cli {
     /// Path to a configuration file (Raff.toml, .raff.toml, or custom path).
@@ -135,7 +135,7 @@ pub struct VolatilityArgs {
     #[clap(long, short, default_value = ".")]
     pub path: std::path::PathBuf,
 
-    /// Weighting factor for lines changed (churn) vs. commit touch count.
+    /// Weight applied to lines changed (churn) relative to commit touches: raw score = touches + alpha * churn.
     #[clap(long, default_value_t = 0.01)]
     pub alpha: f64,
 
@@ -310,7 +310,7 @@ pub struct AllArgs {
     #[clap(long, default_value_t = 10)]
     pub sc_threshold: usize,
 
-    /// Weighting factor for lines changed (churn) vs. commit touch count.
+    /// Weight applied to lines changed (churn) relative to commit touches: raw score = touches + alpha * churn.
     #[clap(long, default_value_t = 0.01)]
     pub vol_alpha: f64,
 

@@ -1,9 +1,17 @@
 //! Statement Count Rule
 //!
 //! This module provides the statement count analysis rule, which counts the number of
-//! statements in each Rust component (top-level directory under the source path) and
-//! checks whether any component exceeds a specified percentage threshold of the total
-//! statements.
+//! statements in each Rust component and checks whether any component exceeds a
+//! specified percentage threshold of the total statements.
+//!
+//! # Components
+//!
+//! When the analysis path is the root of a Cargo workspace with at least two members,
+//! each workspace member package is a component, named by package name. A file
+//! belongs to the member owning its deepest ancestor directory (see
+//! [`MemberOwnership`]); files no member owns are grouped under
+//! [`OUTSIDE_WORKSPACE_MEMBERS`]. Otherwise, and always in staged mode, each
+//! top-level directory under the analysis path is a component.
 //!
 //! # Overview
 //!
@@ -49,7 +57,6 @@
 //! - No Rust statements are found in any files
 //! - An error occurs during AST parsing
 
-use bincode;
 use maud::Markup;
 use maud::html;
 use serde::{Deserialize, Serialize};
@@ -58,7 +65,8 @@ use syn::File as SynFile;
 use syn::visit::Visit;
 use tracing::instrument;
 
-use crate::cache::{CacheEntry, CacheKey, CacheManager};
+use crate::cache::{CacheKey, CacheManager};
+use crate::cargo_workspace::{MemberOwnership, OUTSIDE_WORKSPACE_MEMBERS};
 use crate::ci_report::{Finding, Severity, ToFindings};
 use crate::cli::{CiOutputFormat, StatementCountArgs, StatementCountOutputFormat}; // Import the specific args struct
 use crate::counter::StmtCounter; // Assuming counter.rs is at crate::counter
@@ -67,6 +75,10 @@ use crate::file_utils::{relative_namespace, top_level_component}; // Assuming fi
 use crate::html_utils; // Now using Maud-based html_utils
 use crate::reporting::print_report; // Assuming reporting.rs is at crate::reporting // Import the new HTML utilities
 use crate::rule::Rule;
+
+/// Cache version for statement count data. Increment when the serialisation format
+/// or counting semantics change so entries from older versions are never read.
+const STATEMENT_COUNT_CACHE_VERSION: &str = "3";
 
 /// Rule to count statements in Rust components and check against a threshold.
 #[derive(Debug, Default)]
@@ -101,9 +113,7 @@ impl ToFindings for StatementCountData {
                         component, stmt_count, percentage, self.threshold
                     ),
                     location: None, // We don't track individual files in StatementCountData
-                    help_uri: Some(
-                        "https://github.com/liamwh/raff/docs/statement-count".to_string(),
-                    ),
+                    help_uri: Some("https://github.com/liamwh/raff#statement-count".to_string()),
                     fingerprint: Some(format!(
                         "statement-count:{}:{}:{}",
                         component, self.threshold, stmt_count
@@ -252,35 +262,6 @@ impl StatementCountRule {
         let threshold = args.threshold;
         let analysis_path = &args.path;
 
-        let cache_key = CacheKey::new(
-            format!("statement_count:{}", analysis_path.display()),
-            None, // No git state for statement count
-            vec![
-                ("threshold".to_string(), threshold.to_string()),
-                ("staged".to_string(), args.staged.to_string()),
-            ],
-        );
-        let cache_manager = if args.staged {
-            None
-        } else {
-            Some(CacheManager::new()?)
-        };
-
-        // Try to get cached result for full-repo analysis only.
-        if let Some(cache_manager) = cache_manager.as_ref()
-            && let Some(cached_entry) = cache_manager.get(&cache_key)?
-        {
-            tracing::info!("Using cached statement count analysis result");
-            let cached_data: StatementCountData = bincode::deserialize(&cached_entry.data)
-                .map_err(|e| {
-                    RaffError::parse_error(format!(
-                        "Failed to deserialize cached statement count data: {}",
-                        e
-                    ))
-                })?;
-            return Ok(cached_data);
-        }
-
         if !analysis_path.exists() {
             return Err(RaffError::invalid_input_with_arg(
                 "Path not found",
@@ -304,33 +285,90 @@ impl StatementCountRule {
             ));
         }
 
-        let mut file_to_stmt: HashMap<String, usize> = HashMap::new();
-        for path_buf in &all_rs_files {
-            let content = fs::read_to_string(path_buf)?;
-            let ast: SynFile = syn::parse_file(&content)?;
-            let mut counter = StmtCounter::new();
-            counter.visit_file(&ast);
-            let key = path_buf.to_string_lossy().into_owned();
-            file_to_stmt.insert(key, counter.count);
+        let sources = all_rs_files
+            .iter()
+            .map(fs::read_to_string)
+            .collect::<std::io::Result<Vec<String>>>()?;
+
+        // Staged analysis sees a partial file set, so only full-tree results are cached
+        // and workspace membership is not resolved.
+        let (cache_manager, ownership) = if args.staged {
+            (None, None)
+        } else {
+            (
+                Some(CacheManager::new()?),
+                MemberOwnership::at_workspace_root(analysis_path),
+            )
+        };
+        let grouping = ownership.as_ref().map_or_else(
+            || "directory".to_string(),
+            |ownership| format!("workspace\n{}", ownership.fingerprint()),
+        );
+        let cache_key = CacheKey::from_contents(
+            all_rs_files
+                .iter()
+                .zip(&sources)
+                .map(|(path, source)| (path.as_path(), source.as_bytes())),
+            None,
+            vec![
+                (
+                    "cache_version".to_string(),
+                    STATEMENT_COUNT_CACHE_VERSION.to_string(),
+                ),
+                ("threshold".to_string(), threshold.to_string()),
+                ("grouping".to_string(), grouping),
+            ],
+        );
+        if let Some(cache_manager) = cache_manager.as_ref()
+            && let Some(cached_data) =
+                cache_manager.get_decoded::<StatementCountData>(&cache_key)?
+        {
+            tracing::info!("Using cached statement count analysis result");
+            return Ok(cached_data);
         }
 
-        if file_to_stmt.is_empty() {
+        let mut file_statement_counts: Vec<(&PathBuf, usize)> =
+            Vec::with_capacity(all_rs_files.len());
+        for (path_buf, content) in all_rs_files.iter().zip(&sources) {
+            let ast: SynFile = match syn::parse_file(content) {
+                Ok(ast) => ast,
+                Err(err) => {
+                    eprintln!(
+                        "Warning: Failed to parse {}: {}. Skipping it for statement counting.",
+                        path_buf.display(),
+                        err
+                    );
+                    continue;
+                }
+            };
+            let mut counter = StmtCounter::new();
+            counter.visit_file(&ast);
+            file_statement_counts.push((path_buf, counter.count));
+        }
+
+        if file_statement_counts.is_empty() {
             return Err(RaffError::analysis_error(
                 "statement_count",
                 format!(
-                    "Did not find any Rust AST statements under {}",
+                    "None of the `.rs` files under {} could be parsed",
                     analysis_path.display()
                 ),
             ));
         }
 
         let mut component_stats: HashMap<String, (usize, usize)> = HashMap::new();
-        for path_buf in &all_rs_files {
-            let namespace = relative_namespace(path_buf, analysis_path);
-            let top = top_level_component(&namespace);
-            let path_str = path_buf.to_string_lossy();
-            let stmt_count = *file_to_stmt.get(&path_str.into_owned()).unwrap_or(&0);
-            let entry = component_stats.entry(top).or_insert((0, 0));
+        for (path_buf, stmt_count) in file_statement_counts {
+            let component = match &ownership {
+                Some(ownership) => {
+                    let relative = path_buf.strip_prefix(analysis_path).unwrap_or(path_buf);
+                    ownership
+                        .owner(relative)
+                        .unwrap_or(OUTSIDE_WORKSPACE_MEMBERS)
+                        .to_string()
+                }
+                None => top_level_component(&relative_namespace(path_buf, analysis_path)),
+            };
+            let entry = component_stats.entry(component).or_insert((0, 0));
             entry.0 += 1;
             entry.1 += stmt_count;
         }
@@ -353,16 +391,8 @@ impl StatementCountRule {
             analysis_path: analysis_path.to_path_buf(),
         };
 
-        // Cache the result
-        let serialized_data = bincode::serialize(&result).map_err(|e| {
-            RaffError::parse_error(format!(
-                "Failed to serialize statement count data for caching: {}",
-                e
-            ))
-        })?;
         if let Some(cache_manager) = cache_manager {
-            let cache_entry = CacheEntry::new(serialized_data);
-            cache_manager.put(&cache_key, cache_entry)?;
+            cache_manager.put_encoded(&cache_key, &result)?;
         }
 
         Ok(result)
@@ -372,7 +402,7 @@ impl StatementCountRule {
         let explanations_data = [
             (
                 "Component",
-                "Name of the top-level component (e.g., directory under src/, or crate name).",
+                "Workspace member crate when analysing a Cargo workspace root; otherwise the top-level directory under the analysis path.",
             ),
             ("File Count", "Number of .rs files within this component."),
             (
@@ -528,6 +558,81 @@ pub fn func_b() {
             output_file: None,
             staged: false,
         }
+    }
+
+    /// Writes `contents` to `root/relative`, creating parent directories.
+    fn write_file(root: &std::path::Path, relative: &str, contents: &str) {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().expect("fixture paths have a parent"))
+            .expect("Failed to create fixture directory");
+        fs::write(&path, contents).expect("Failed to write fixture file");
+    }
+
+    fn write_library_crate(root: &std::path::Path, dir: &str, name: &str, lib_rs: &str) {
+        write_file(
+            root,
+            &format!("{dir}/Cargo.toml"),
+            &format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        );
+        write_file(root, &format!("{dir}/src/lib.rs"), lib_rs);
+    }
+
+    /// A workspace whose root package `app` builds its binary from
+    /// `crates/core/main.rs` (2 statements) and has an integration test in
+    /// `tests/it.rs` (1 statement), with members `a` (3 statements) and `b`
+    /// (4 statements).
+    fn create_workspace_with_root_package() -> TempDir {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let root = temp_dir.path();
+        write_file(
+            root,
+            "Cargo.toml",
+            r#"[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "app"
+path = "crates/core/main.rs"
+
+[workspace]
+members = ["crates/a", "crates/b"]
+"#,
+        );
+        write_file(
+            root,
+            "crates/core/main.rs",
+            "fn main() {\n    let x = 1;\n    let y = 2;\n}\n",
+        );
+        write_file(
+            root,
+            "tests/it.rs",
+            "#[test]\nfn it() {\n    let a = 1;\n}\n",
+        );
+        write_library_crate(
+            root,
+            "crates/a",
+            "a",
+            "pub fn f() {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n}\n",
+        );
+        write_library_crate(
+            root,
+            "crates/b",
+            "b",
+            "pub fn g() {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n    let d = 4;\n}\n",
+        );
+        temp_dir
+    }
+
+    fn sorted_components(data: &StatementCountData) -> Vec<(&str, (usize, usize))> {
+        let mut components: Vec<_> = data
+            .component_stats
+            .iter()
+            .map(|(name, &stats)| (name.as_str(), stats))
+            .collect();
+        components.sort_unstable();
+        components
     }
 
     #[test]
@@ -686,6 +791,120 @@ pub fn func_b() {
         let (file_count_b, stmt_count_b) = data.component_stats.get("component_b").unwrap();
         assert_eq!(*file_count_b, 1, "component_b should have 1 file");
         assert_eq!(*stmt_count_b, 4, "component_b should have 4 statements");
+    }
+
+    #[test]
+    fn test_analyze_groups_workspace_root_by_member_package() {
+        let temp_dir = create_workspace_with_root_package();
+        let data = StatementCountRule::new()
+            .analyze(&create_test_args(temp_dir.path().to_path_buf()))
+            .expect("analyze should succeed");
+
+        // `app` owns crates/core/main.rs through its bin target and tests/it.rs
+        // through its manifest directory, even though neither lives under a
+        // directory named after it.
+        assert_eq!(
+            sorted_components(&data),
+            [("a", (1, 3)), ("app", (2, 3)), ("b", (1, 4))]
+        );
+        assert_eq!(data.grand_total, 10);
+    }
+
+    #[test]
+    fn test_analyze_groups_files_outside_workspace_members() {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let root = temp_dir.path();
+        write_file(
+            root,
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/a\", \"crates/b\"]\nexclude = [\"fuzz\"]\nresolver = \"2\"\n",
+        );
+        write_library_crate(root, "crates/a", "a", "pub fn f() {\n    let a = 1;\n}\n");
+        write_library_crate(root, "crates/b", "b", "pub fn g() {\n    let b = 1;\n}\n");
+        write_library_crate(
+            root,
+            "fuzz",
+            "fuzz",
+            "pub fn h() {\n    let x = 1;\n    let y = 2;\n}\n",
+        );
+
+        let data = StatementCountRule::new()
+            .analyze(&create_test_args(root.to_path_buf()))
+            .expect("analyze should succeed");
+
+        assert_eq!(
+            sorted_components(&data),
+            [
+                (OUTSIDE_WORKSPACE_MEMBERS, (1, 2)),
+                ("a", (1, 1)),
+                ("b", (1, 1))
+            ]
+        );
+        assert_eq!(data.grand_total, 4, "unowned files still count");
+    }
+
+    #[test]
+    fn test_analyze_single_package_keeps_directory_grouping() {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let root = temp_dir.path();
+        write_library_crate(root, ".", "solo", "pub fn f() {\n    let a = 1;\n}\n");
+        write_file(
+            root,
+            "tests/it.rs",
+            "#[test]\nfn it() {\n    let a = 1;\n}\n",
+        );
+
+        let data = StatementCountRule::new()
+            .analyze(&create_test_args(root.to_path_buf()))
+            .expect("analyze should succeed");
+
+        assert_eq!(
+            sorted_components(&data),
+            [("src", (1, 1)), ("tests", (1, 1))]
+        );
+    }
+
+    #[test]
+    fn test_analyze_does_not_reuse_cached_grouping_after_workspace_changes() {
+        let temp_dir = create_workspace_with_root_package();
+        let root = temp_dir.path();
+        let rule = StatementCountRule::new();
+        let args = create_test_args(root.to_path_buf());
+        rule.analyze(&args)
+            .expect("workspace analysis should succeed");
+
+        // Dropping the workspace leaves every `.rs` file untouched, so only the
+        // grouping distinguishes the two runs.
+        write_file(
+            root,
+            "Cargo.toml",
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[[bin]]\nname = \"app\"\npath = \"crates/core/main.rs\"\n",
+        );
+        let data = rule
+            .analyze(&args)
+            .expect("directory analysis should succeed");
+
+        assert_eq!(
+            sorted_components(&data),
+            [("crates", (3, 9)), ("tests", (1, 1))]
+        );
+    }
+
+    #[test]
+    fn test_analyze_skips_unparsable_file_and_counts_the_rest() {
+        let temp_dir = create_test_directory();
+        fs::write(temp_dir.path().join("src/broken.rs"), "pub fn broken( {")
+            .expect("Failed to write broken.rs");
+        let rule = StatementCountRule::new();
+        let args = create_test_args(temp_dir.path().to_path_buf());
+
+        let data = rule
+            .analyze(&args)
+            .expect("an unparsable file must not abort the analysis");
+
+        assert_eq!(data.grand_total, 5, "valid files are still counted");
+        let (file_count, _) = data.component_stats["src"];
+        assert_eq!(file_count, 2, "the unparsable file is excluded");
     }
 
     #[test]

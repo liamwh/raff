@@ -1,22 +1,14 @@
-# raff - Rust Architecture Fitness Functions 🦀
+# raff - Rust Architecture Fitness Functions
 
-Inspired by [Mark Richards](https://developertoarchitect.com/mark-richards.html)\'s [workshop](https://2025.dddeurope.com/program/architecture-the-hard-parts/) on software architecture, this tool aims to provide practical ways to make architectural goals measurable and continuously verified ✅.
+Inspired by [Mark Richards](https://developertoarchitect.com/mark-richards.html)'s [workshop](https://2025.dddeurope.com/program/architecture-the-hard-parts/) on software architecture, raff turns architectural goals for a Rust codebase into checks you can run locally, in a pre-commit hook or in CI.
 
-## Features 🌟
-
-* **Statement Count Analysis:** 📝 Determine the number of statements in your Rust files or directories. Useful for gauging code volume and complexity of components.
-* **Code Volatility Analysis:** 🔄 Identifies parts of your codebase that change most frequently, leveraging Git history. Helps pinpoint unstable areas or potential refactoring candidates.
-* **Module Coupling Analysis:** 🔗 Measures dependencies between different Rust modules or components, helping you manage and reduce unwanted coupling.
-* **General Rust Code Analysis:** 🔬 A flexible command for various static analyses on Rust source code.
-* **Command-Line Interface:** 💻 Easy-to-use CLI for running analyses and configuring options.
-* **Multiple Output Formats:** 📊 HTML, JSON, CSV and DOT (GraphViz).
-
-## Getting Started 🚀
+## Getting started
 
 ### Prerequisites
 
-* Rust toolchain (latest stable version recommended). Install from [rustup.rs](https://rustup.rs/).
-* Git (for volatility analysis).
+* A Rust toolchain. Install it from [rustup.rs](https://rustup.rs/).
+* Git, for the volatility and contributor reports.
+* `rust-code-analysis-cli` on your `PATH`, for the `rust-code-analysis` command only (`cargo install rust-code-analysis-cli`).
 
 ### Installation
 
@@ -29,57 +21,111 @@ brew install liamwh/raff/raff
 just install
 ```
 
-Once installed, the `raff` binary will be available on your `PATH`.
+Once installed, the `raff` binary is on your `PATH`. `raff --help` lists the commands and `raff <COMMAND> --help` lists each command's flags.
 
-### Running
+## Fitness functions
 
-To see the list of available commands and their options:
+Every command takes `--path` (default `.`), `--output` for the human-readable report, `--output-file` to write it to disk, and `--ci-output sarif` or `--ci-output j-unit` for CI tooling. Global flags include `--config`, `--profile`, `--staged` (analyse only git-staged changes), `--no-cache` and `--clear-cache`.
 
-```bash
-raff --help
-```
-
-## Usage 📖
-
-The general command structure is:
+### Statement count
 
 ```bash
-raff <COMMAND> [OPTIONS]
+raff statement-count --path . --threshold 10
 ```
 
-### Available Commands
+raff parses every `.rs` file under `--path` with `syn`, counts statements, and groups the counts into components. When `--path` is the root of a Cargo workspace with two or more members, each member package is a component, named by package name; a file belongs to the member whose manifest or target directory is its closest ancestor, and files no member owns are grouped under `(outside workspace members)`. Anywhere else, including a single-package crate, each top-level directory under `--path` is a component.
 
-* **`StatementCount`**: Analyzes statement counts.
-  * Example: `raff statement-count --path ./src --output-format table`
-  * *(You might need to add specific options based on how `StatementCountArgs` is defined. Common options could include `--path <directory/file>`, `--exclude <patterns>`, etc.)*
+Each component's share of the total is reported as a percentage. A component above `--threshold` percent (default 10) is an error, and the command exits non-zero. Files that `syn` cannot parse are skipped with a warning naming the file.
 
-* **`Volatility`**: Analyzes code churn from Git history.
-  * Example: `raff volatility --path . --output-format json`
-  * *(Typically requires the target to be a Git repository. Options might include date ranges, file patterns.)*
+Output formats: `table`, `html`.
 
-* **`Coupling`**: Analyzes dependencies between modules.
-  * Example: `raff coupling --path ./src`
-  * *(Might require specifying module boundaries or analysis depth.)*
-
-* **`RustCodeAnalysis`**: Performs general Rust code analysis.
-  * Example: `raff rust-code-analysis --path ./src --rule <specific_rule_name>`
-  * *(The exact options will depend on the implemented analysis rules.)*
-
-For detailed options for each command, run:
+### Module coupling
 
 ```bash
-raff <COMMAND> --help
+raff coupling --path . --granularity both
 ```
 
-## Pre-Commit Hook Integration 🔗
+For each workspace crate, and each module within a crate, raff reports:
 
-raff includes a built-in `pre-commit` profile optimized for use as a pre-commit hook. This profile:
-- Analyzes only git-staged changes
-- Uses fast, read-only coupling checks suitable for commit hooks
-- Prints a single-line summary on success and a CLI table on failure
-- Fails the hook when it finds warnings or errors
+* **Ce** (efferent coupling), the number of other components this one depends on.
+* **Ca** (afferent coupling), the number of other components that depend on this one.
+* **I** (instability), `Ce / (Ce + Ca)`, from 0 (stable) to 1 (unstable).
 
-### Configuration
+Crate edges come from `cargo metadata`. Normal and build dependencies count; dev-dependencies do not. Module edges come from `use` statements and paths in the source.
+
+A high I is not a problem on its own. Binaries and other entry points should sit at or near 1. raff instead checks the Stable Dependencies Principle: a crate should depend only on crates at least as stable as itself. For every workspace edge `A -> B` where `I(B) > I(A)`, raff emits a warning such as:
+
+```text
+Crate 'helix-tui' (I=0.67) depends on less stable crate 'helix-view' (I=0.70), violating the Stable Dependencies Principle
+```
+
+`--granularity` accepts `crate`, `module` or `both`. Output formats: `table`, `json`, `yaml`, `html`, `dot` (Graphviz).
+
+### Volatility
+
+```bash
+raff volatility --path . --alpha 0.01 --since 2024-01-01
+```
+
+raff walks the git history and, for each crate, counts commit touches and churn (lines added plus lines deleted) in the crate's `.rs` files. A commit counts as a touch only if it changes at least one Rust file in the crate. The score is:
+
+```text
+raw_score = touches + alpha * churn
+```
+
+Touches always carry a weight of 1. The default `--alpha 0.01` keeps the score focused on how often a crate changes; raise it to give lines changed more influence. `--normalize` also divides the score by the crate's lines of code, `--skip-merges` ignores merge commits and `--since YYYY-MM-DD` limits the window. Crates in the top quartile of raw scores get a warning. `--path` can be any directory in the repository: raff reports the crates under it plus the crate that contains it, so `--path src` in a single-crate repository reports that crate.
+
+Output formats: `table`, `csv`, `json`, `yaml`, `html`.
+
+### Rust code analysis
+
+```bash
+raff rust-code-analysis --path . --metrics
+```
+
+A wrapper around `rust-code-analysis-cli` that runs it over every `src/` folder and collects the metrics (cyclomatic and cognitive complexity, Halstead, maintainability index and so on) into one report. Pass extra arguments through with `-f`, set parallelism with `--jobs`. It reports metrics as notes and does not fail the run.
+
+Output formats: `table`, `json`, `yaml`, `html`.
+
+### Contributor report
+
+```bash
+raff contributor-report --path . --decay 0.01 --since 2024-01-01
+```
+
+Ranks committers from git history. Each commit scores `(1 + churn + files_touched) * e^(-decay * days_since_commit)`, so recent work counts for more. When `--path` is a subdirectory of the repository, only changes under it count.
+
+Output formats: `table`, `html`, `json`, `yaml`.
+
+### Everything at once
+
+```bash
+raff all --path . --output html --output-file raff-report.html
+```
+
+Runs every analysis and writes one consolidated report (`html`, `json` or `cli`). Per-rule settings take prefixed flags such as `--sc-threshold`, `--vol-alpha` and `--coup-granularity`. `--fast` skips volatility and rust-code-analysis, and `--fail-on-warnings` makes warnings fail the run as well as errors. A rule that cannot run (for example volatility outside a git repository) is reported as an error and fails the run. A missing `rust-code-analysis-cli` is the exception: it is reported as a note and the run still passes.
+
+## Configuration
+
+raff reads settings, one section per rule, from these files. Later files override earlier ones, and flags passed on the command line override all of them:
+
+1. `~/.config/raff/raff.toml` (or under `$XDG_CONFIG_HOME`)
+2. `.raff/raff.local.toml` at the git repository root
+3. `Raff.toml`, `.raff.toml` or `raff.toml`, searched upwards from the current directory, or `.raff/raff.toml` at the repository root
+
+Pass `--config <PATH>` to use a specific file. See [`.raff/raff.toml`](.raff/raff.toml) for this repository's own configuration.
+
+Statement count and volatility results are cached in `~/.cache/raff` (set `RAFF_CACHE_DIR` to move it). `--no-cache` skips the cache for that run and `--clear-cache` empties it.
+
+## Pre-commit hook
+
+raff has a built-in `pre-commit` profile for use as a hook. It runs the coupling SDP check only. Statement count needs the whole tree to compute each component's share, so run `raff all` in CI for it; volatility and rust-code-analysis are too slow for a hook.
+
+With `--profile pre-commit`, `raff all`:
+
+* analyses only git-staged changes,
+* prints a one-line summary on success and a CLI table on failure,
+* sets `fail_on_warnings`, so any SDP warning fails the hook.
 
 Add raff to your `.pre-commit-config.yaml`:
 
@@ -95,37 +141,24 @@ repos:
         files: '(^|/)Cargo\.toml$|(^|/)Cargo\.lock$|(^|/)rust-toolchain(\.toml)?$|^\.cargo/|\.rs$'
 ```
 
-### Pre-Commit Profile Settings
-
-The built-in defaults work without any extra configuration. If you want to override them,
-the pre-commit profile can be customized in `.raff/raff.toml`:
+The defaults work without extra configuration. To override them, add a profile to `.raff/raff.toml`:
 
 ```toml
 [profile.pre_commit]
 fast = true
 staged = true
 quiet = true
-sc_threshold = 25
 ```
 
-### Manual Testing
-
-Test the pre-commit profile manually:
+To try it by hand, stage some files and run the profile:
 
 ```bash
-# Stage some files
 git add src/
-
-# Run with pre-commit profile
 raff --profile pre-commit all
 ```
 
-## TODOs / Future Work 🗺️
+## Future work
 
-The following enhancements are planned or could be valuable additions:
-
-* [ ] 🔶 FF: Do any domain objects use primitive types? (e.g. `String` instead of `Name`).
-* [ ] 🏛️ FF: Is codebase flat? (Analyze and visualize component hierarchy).
-* [ ] 🚫 FF: No source code should reside in the root namespace (or other configurable namespace rules).
-* [ ] ⚖️ Configurable thresholds for fitness functions to produce pass/fail results.
-* [ ] 🚀 Integration with CI/CD pipelines / github actions.
+* [ ] Do any domain objects use primitive types (e.g. `String` instead of `Name`)?
+* [ ] Is the codebase flat? Analyse and visualise the component hierarchy.
+* [ ] No source code should live in the root namespace (or other configurable namespace rules).

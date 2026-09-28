@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="${ROOT_DIR}/target/debug/raff"
+TARGET_DIR="$(cargo metadata --no-deps --format-version 1 --manifest-path "${ROOT_DIR}/Cargo.toml" | jq -r .target_directory)"
+BIN="${TARGET_DIR}/debug/raff"
 
 log() { printf "==> %s\n" "$*"; }
 warn() { printf "WARN: %s\n" "$*" >&2; }
@@ -150,17 +151,17 @@ assert_volatility() {
     "crate_name": "crate_a",
     "birth_date": "2024-01-01",
     "commit_touch_count": 2,
-    "lines_added": 21,
+    "lines_added": 14,
     "lines_deleted": 1,
-    "raw_score": 24.0
+    "raw_score": 17.0
   },
   {
     "crate_name": "crate_b",
     "birth_date": "2024-01-01",
     "commit_touch_count": 2,
-    "lines_added": 16,
+    "lines_added": 8,
     "lines_deleted": 0,
-    "raw_score": 18.0
+    "raw_score": 10.0
   }
 ]'
   [[ "${sorted}" == "$(echo "${expected}" | jq -c 'sort_by(.crate_name)')" ]] \
@@ -180,7 +181,7 @@ assert_contributor_report() {
   log "Checking contributor-report output (JSON)"
   local raw projected expected
   raw="$("${BIN}" contributor-report --path "${WORKDIR}" --decay 0 --output json)"
-  projected="$(echo "${raw}" | jq -c 'map({author, commit_count, lines_added, lines_deleted, files_touched, score}) | sort_by(.author)')"
+  projected="$(echo "${raw}" | jq -c 'map({author, commit_count, lines_added, lines_deleted, files_touched, score, last_commit_date}) | sort_by(.author)')"
   expected='[
   {
     "author": "Alice",
@@ -188,7 +189,8 @@ assert_contributor_report() {
     "lines_added": 36,
     "lines_deleted": 1,
     "files_touched": 7,
-    "score": 46.0
+    "score": 46.0,
+    "last_commit_date": "2024-01-03T00:00:00Z"
   },
   {
     "author": "Bob",
@@ -196,7 +198,8 @@ assert_contributor_report() {
     "lines_added": 4,
     "lines_deleted": 0,
     "files_touched": 1,
-    "score": 6.0
+    "score": 6.0,
+    "last_commit_date": "2024-01-02T00:00:00Z"
   }
 ]'
   [[ "${projected}" == "$(echo "${expected}" | jq -c 'sort_by(.author)')" ]] \

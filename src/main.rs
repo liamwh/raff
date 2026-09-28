@@ -1,11 +1,11 @@
-//! rust-ff: A collection of Rust code analysis tools and fitness functions.
+//! raff: A collection of Rust code analysis tools and fitness functions.
 
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use raff_core::{
     AllOutputFormat, CacheManager, Cli, Commands, ConfigSourceType, ContributorReportRule,
-    CouplingGranularity, CouplingRule, RustCodeAnalysisRule, StatementCountRule, VolatilityRule,
-    all_rules, apply_pre_commit_profile, error::RaffError, error::Result, load_hierarchical_config,
-    merge_all_args, merge_contributor_report_args, merge_coupling_args,
+    CouplingGranularity, CouplingRule, ExplicitCliArgs, RustCodeAnalysisRule, StatementCountRule,
+    VolatilityRule, all_rules, apply_pre_commit_profile, error::RaffError, error::Result,
+    load_hierarchical_config, merge_all_args, merge_contributor_report_args, merge_coupling_args,
     merge_rust_code_analysis_args, merge_statement_count_args, merge_volatility_args,
 };
 use std::process::exit;
@@ -20,7 +20,7 @@ fn main() -> Result<()> {
     })?;
 
     // Initialize tracing subscriber with environment filter
-    // Example: RUST_LOG=aff=debug,warn (aff is the binary name)
+    // Example: RUST_LOG=raff=debug,warn (raff is the binary name)
     // If RUST_LOG is not set, it defaults to "info".
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -32,18 +32,19 @@ fn main() -> Result<()> {
         )
     })?;
 
-    let cli_args = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let cli_args = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    let explicit_args = ExplicitCliArgs::from_matches(&matches);
     tracing::debug!("Parsed CLI arguments: {:?}", cli_args);
 
     // Handle cache CLI flags
-    let mut cache_manager = CacheManager::new()?;
     if cli_args.clear_cache {
         tracing::info!("Clearing cache as requested by --clear-cache flag");
-        cache_manager.clear()?;
+        CacheManager::new()?.clear()?;
     }
     if cli_args.no_cache {
         tracing::info!("Caching disabled for this run as requested by --no-cache flag");
-        cache_manager.set_enabled(false);
+        raff_core::cache::disable_caching();
     }
 
     // Load configuration hierarchically from user, repo, and local sources
@@ -84,7 +85,7 @@ fn main() -> Result<()> {
             if profile_staged {
                 args.staged = true;
             }
-            let mut merged_args = merge_statement_count_args(&args, &config);
+            let mut merged_args = merge_statement_count_args(&args, &config, &explicit_args);
             // Propagate global staged flag and profile staged setting
             merged_args.staged = cli_args.staged || profile_staged || args.staged;
             let rule = StatementCountRule::new();
@@ -92,7 +93,7 @@ fn main() -> Result<()> {
             rule.run(&merged_args)
         }
         Commands::Volatility(args) => {
-            let merged_args = merge_volatility_args(&args, &config);
+            let merged_args = merge_volatility_args(&args, &config, &explicit_args);
             let rule = VolatilityRule::new();
             tracing::info!("Running Volatility rule with args: {:?}", merged_args);
             rule.run(&merged_args)
@@ -102,7 +103,7 @@ fn main() -> Result<()> {
             if profile_staged {
                 args.staged = true;
             }
-            let mut merged_args = merge_coupling_args(&args, &config);
+            let mut merged_args = merge_coupling_args(&args, &config, &explicit_args);
             // Propagate global staged flag and profile staged setting
             merged_args.staged = cli_args.staged || profile_staged || args.staged;
             let rule = CouplingRule::new();
@@ -110,7 +111,7 @@ fn main() -> Result<()> {
             rule.run(&merged_args)
         }
         Commands::RustCodeAnalysis(args) => {
-            let merged_args = merge_rust_code_analysis_args(&args, &config);
+            let merged_args = merge_rust_code_analysis_args(&args, &config, &explicit_args);
             let rule = RustCodeAnalysisRule::new();
             tracing::info!("Running RustCodeAnalysis rule with args: {:?}", merged_args);
             rule.run(&merged_args)
@@ -126,7 +127,7 @@ fn main() -> Result<()> {
             if profile_staged {
                 args.staged = true;
             }
-            let mut merged_args = merge_all_args(&args, &config);
+            let mut merged_args = merge_all_args(&args, &config, &explicit_args);
             // Propagate global staged flag and profile staged setting
             merged_args.staged = cli_args.staged || profile_staged || args.staged;
             if pre_commit_profile_active {
@@ -140,7 +141,7 @@ fn main() -> Result<()> {
             all_rules::run_all(&merged_args)
         }
         Commands::ContributorReport(args) => {
-            let merged_args = merge_contributor_report_args(&args, &config);
+            let merged_args = merge_contributor_report_args(&args, &config, &explicit_args);
             let rule = ContributorReportRule::new();
             tracing::info!(
                 "Running ContributorReport rule with args: {:?}",

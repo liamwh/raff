@@ -26,7 +26,7 @@
 //!         severity: Severity::Error,
 //!         message: "Component too large".to_string(),
 //!         location: None,
-//!         help_uri: Some("https://github.com/liamwh/raff/docs/statement-count".to_string()),
+//!         help_uri: Some("https://github.com/liamwh/raff#statement-count".to_string()),
 //!         fingerprint: Some("unique-id".to_string()),
 //!     }
 //! ];
@@ -348,7 +348,7 @@ pub fn to_junit(findings: &[Finding], suite_name: &str) -> Result<String> {
                         xml.push_str(&format!("\nHelp: {}", escape_xml(uri)));
                     }
                     xml.push_str("</system-out>");
-                    xml.push('>');
+                    xml.push_str("</testcase>");
                 }
                 Severity::Note => {
                     // Note is informational - test passes
@@ -374,10 +374,13 @@ fn escape_xml(s: &str) -> String {
 }
 
 /// Truncates a testcase name to a reasonable length.
-/// JUnit parsers may have issues with very long names.
+/// JUnit parsers may have issues with very long names. The full message is
+/// still written to the failure or system-out body.
 fn truncate_testcase_name(name: &str) -> String {
-    if name.len() > 200 {
-        format!("{}...", &name[..197])
+    const MAX_CHARS: usize = 200;
+    if name.chars().count() > MAX_CHARS {
+        let kept: String = name.chars().take(MAX_CHARS - 3).collect();
+        format!("{kept}...")
     } else {
         name.to_string()
     }
@@ -593,8 +596,16 @@ mod tests {
     fn test_truncate_testcase_name_long() {
         let long = "a".repeat(300);
         let truncated = truncate_testcase_name(&long);
-        assert!(truncated.len() <= 200);
+        assert!(truncated.chars().count() <= 200);
         assert!(truncated.ends_with("..."));
+    }
+
+    #[test]
+    fn test_truncate_testcase_name_does_not_split_multibyte_characters() {
+        // 196 ASCII bytes then a 3-byte arrow straddling the old byte cut at 197.
+        let name = format!("{}→{}", "a".repeat(196), "b".repeat(50));
+        let truncated = truncate_testcase_name(&name);
+        assert!(truncated.ends_with("→..."), "got: {truncated}");
     }
 
     #[test]

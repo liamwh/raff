@@ -71,6 +71,12 @@ pub enum RaffError {
         /// The argument or value that was invalid.
         argument: Option<String>,
     },
+
+    /// A required external tool is not installed or not on `PATH`.
+    ToolNotFound {
+        /// The executable that could not be found.
+        tool: String,
+    },
 }
 
 impl RaffError {
@@ -222,6 +228,14 @@ impl RaffError {
         }
     }
 
+    /// Creates a new `ToolNotFound` error for an external executable.
+    ///
+    /// # Arguments
+    /// * `tool` - The executable that could not be found.
+    pub fn tool_not_found(tool: impl Into<String>) -> Self {
+        Self::ToolNotFound { tool: tool.into() }
+    }
+
     /// Returns the name of the error variant.
     pub fn name(&self) -> &'static str {
         match self {
@@ -231,6 +245,7 @@ impl RaffError {
             Self::ConfigError { .. } => "ConfigError",
             Self::AnalysisError { .. } => "AnalysisError",
             Self::InvalidInput { .. } => "InvalidInput",
+            Self::ToolNotFound { .. } => "ToolNotFound",
         }
     }
 
@@ -280,6 +295,9 @@ impl RaffError {
                 "Check the documentation for valid input formats".to_string(),
                 "Verify all required arguments are provided".to_string(),
             ],
+            Self::ToolNotFound { tool } => {
+                vec![format!("Install `{tool}` and make sure it is on your PATH")]
+            }
         }
     }
 }
@@ -341,6 +359,9 @@ impl fmt::Display for RaffError {
                     write!(f, "Invalid input: {}", message)
                 }
             }
+            Self::ToolNotFound { tool } => {
+                write!(f, "'{tool}' is not installed or not on PATH")
+            }
         }
     }
 }
@@ -354,6 +375,7 @@ impl std::error::Error for RaffError {
             Self::ConfigError { source, .. } => source.as_ref().map(|s| s.as_ref() as _),
             Self::AnalysisError { source, .. } => source.as_ref().map(|s| s.as_ref() as _),
             Self::InvalidInput { .. } => None,
+            Self::ToolNotFound { .. } => None,
         }
     }
 }

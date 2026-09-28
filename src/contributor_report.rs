@@ -81,12 +81,13 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use crate::ci_report::{Finding, Severity, ToFindings};
 use crate::error::{RaffError, Result};
 use crate::rule::Rule;
-use chrono::{DateTime, Utc};
-use git2::{Commit, Repository};
+use git2::{Commit, DiffOptions, Repository};
+use jiff::Timestamp;
 use maud::{Markup, html};
 use prettytable::{Table, row};
 use serde::{Deserialize, Serialize};
@@ -101,19 +102,20 @@ pub struct ContributorStats {
     pub lines_added: u32,
     pub lines_deleted: u32,
     pub files_touched: u32,
-    pub last_commit_date: DateTime<Utc>,
+    pub last_commit_date: Timestamp,
     pub score: f64,
 }
 
 impl ContributorStats {
-    pub fn new(author: String) -> Self {
+    /// Creates stats for an author first seen in a commit made at `first_seen`.
+    pub fn new(author: String, first_seen: Timestamp) -> Self {
         Self {
             author,
             commit_count: 0,
             lines_added: 0,
             lines_deleted: 0,
             files_touched: 0,
-            last_commit_date: Utc::now(),
+            last_commit_date: first_seen,
             score: 0.0,
         }
     }
@@ -144,7 +146,7 @@ impl ToFindings for ContributorReportData {
                     stat.score
                 ),
                 location: None, // Contributor report is aggregate data, not file-specific
-                help_uri: Some("https://github.com/liamwh/raff/docs/contributor-report".to_string()),
+                help_uri: Some("https://github.com/liamwh/raff#contributor-report".to_string()),
                 fingerprint: Some(format!(
                     "contributor-report:{}:{}:{}",
                     stat.author,
@@ -234,29 +236,33 @@ impl ContributorReportRule {
     }
 
     fn analyze_impl(&self, args: &ContributorReportArgs) -> Result<ContributorReportData> {
-        let repo = Repository::open(&args.path)
+        let repo = Repository::discover(&args.path)
             .map_err(|_e| RaffError::git_error_with_repo("open repository", args.path.clone()))?;
+        let scope = path_within_workdir(&repo, &args.path)?;
         let mut revwalk = repo.revwalk()?;
         revwalk.push_head()?;
 
         let mut stats: HashMap<String, ContributorStats> = HashMap::new();
-        let now = Utc::now();
+        let now = Timestamp::now();
 
         for oid in revwalk {
             let oid = oid?;
             let commit = repo.find_commit(oid)?;
+            let (lines_added, lines_deleted, files_touched) =
+                self.get_commit_stats(&repo, &commit, scope.as_deref())?;
+            if scope.is_some() && files_touched == 0 {
+                continue;
+            }
+
             let author = commit.author().name().unwrap_or("Unknown").to_string();
+            let commit_time = Timestamp::from_second(commit.time().seconds()).unwrap_or(now);
 
             let contributor = stats
                 .entry(author.clone())
-                .or_insert_with(|| ContributorStats::new(author));
+                .or_insert_with(|| ContributorStats::new(author, commit_time));
 
-            let commit_time = DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or(now);
-            let days_since_commit = now.signed_duration_since(commit_time).num_days() as f64;
+            let days_since_commit = ((now.as_second() - commit_time.as_second()) / 86_400) as f64;
             let weight = (-args.decay * days_since_commit).exp();
-
-            let (lines_added, lines_deleted, files_touched) =
-                self.get_commit_stats(&repo, &commit)?;
 
             contributor.commit_count += 1;
             contributor.lines_added += lines_added;
@@ -307,12 +313,24 @@ impl ContributorReportRule {
         self.analyze_impl(args)
     }
 
-    fn get_commit_stats(&self, repo: &Repository, commit: &Commit) -> Result<(u32, u32, u32)> {
+    /// Lines added, lines deleted and files changed by `commit`, counting only paths
+    /// under `scope` (relative to the working directory) when it is set.
+    fn get_commit_stats(
+        &self,
+        repo: &Repository,
+        commit: &Commit,
+        scope: Option<&Path>,
+    ) -> Result<(u32, u32, u32)> {
         let parent = commit.parent(0);
         let tree = commit.tree()?;
         let parent_tree = parent.ok().and_then(|p| p.tree().ok());
 
-        let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
+        let mut diff_options = DiffOptions::new();
+        if let Some(scope) = scope {
+            diff_options.pathspec(scope);
+        }
+        let diff =
+            repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut diff_options))?;
         let diff_stats = diff.stats()?;
 
         Ok((
@@ -462,6 +480,18 @@ impl ContributorReportRule {
     }
 }
 
+/// `path` relative to the working directory of `repo`, or `None` when `path` is the
+/// whole working tree (or the repository is bare) and no scoping applies.
+fn path_within_workdir(repo: &Repository, path: &Path) -> Result<Option<PathBuf>> {
+    let Some(workdir) = repo.workdir() else {
+        return Ok(None);
+    };
+    let workdir = workdir.canonicalize()?;
+    let path = path.canonicalize()?;
+    let relative = path.strip_prefix(&workdir).unwrap_or(Path::new(""));
+    Ok((!relative.as_os_str().is_empty()).then(|| relative.to_path_buf()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,20 +511,102 @@ mod tests {
             lines_added,
             lines_deleted,
             files_touched,
-            last_commit_date: Utc::now(),
+            last_commit_date: Timestamp::now(),
             score,
         }
     }
 
+    /// Regression: `last_commit_date` used to start at "now", so no commit
+    /// was ever newer and every contributor reported today's date.
     #[test]
-    fn test_contributor_stats_new_creates_default_instance() {
-        let stats = ContributorStats::new("Test Author".to_string());
-        assert_eq!(stats.author, "Test Author", "author should match input");
-        assert_eq!(stats.commit_count, 0, "commit_count should be 0");
-        assert_eq!(stats.lines_added, 0, "lines_added should be 0");
-        assert_eq!(stats.lines_deleted, 0, "lines_deleted should be 0");
-        assert_eq!(stats.files_touched, 0, "files_touched should be 0");
-        assert_eq!(stats.score, 0.0, "score should be 0.0");
+    fn test_last_commit_date_is_the_authors_newest_commit() {
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let repo = git2::Repository::init(temp_dir.path()).expect("Failed to initialise repo");
+        let older = Timestamp::from_second(1_577_836_800).unwrap(); // 2020-01-01
+        let newer = Timestamp::from_second(1_609_459_200).unwrap(); // 2021-01-01
+
+        let mut parent: Option<git2::Oid> = None;
+        for (i, when) in [older, newer].into_iter().enumerate() {
+            std::fs::write(temp_dir.path().join("f.txt"), format!("{i}")).unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(std::path::Path::new("f.txt")).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = git2::Signature::new(
+                "Ada",
+                "ada@example.com",
+                &git2::Time::new(when.as_second(), 0),
+            )
+            .unwrap();
+            let parents: Vec<git2::Commit> = parent
+                .iter()
+                .map(|p| repo.find_commit(*p).unwrap())
+                .collect();
+            let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+            parent = Some(
+                repo.commit(Some("HEAD"), &sig, &sig, "c", &tree, &parent_refs)
+                    .unwrap(),
+            );
+        }
+
+        let args = ContributorReportArgs {
+            path: temp_dir.path().to_path_buf(),
+            since: None,
+            decay: 0.01,
+            output: ContributorReportOutputFormat::Table,
+            ci_output: None,
+            output_file: None,
+        };
+        let data = <ContributorReportRule as Rule>::analyze(&ContributorReportRule::new(), &args)
+            .expect("analysis should succeed");
+        let ada = data.stats.iter().find(|s| s.author == "Ada").unwrap();
+        assert_eq!(ada.commit_count, 2);
+        assert_eq!(ada.last_commit_date, newer);
+    }
+
+    #[test]
+    fn test_subdirectory_path_counts_only_commits_under_it() {
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let repo = git2::Repository::init(temp_dir.path()).expect("Failed to initialise repo");
+        let mut parent: Option<git2::Oid> = None;
+        for (author, file) in [("Ada", "src/lib.rs"), ("Bob", "docs/guide.md")] {
+            let path = temp_dir.path().join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "content\n").unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(std::path::Path::new(file)).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = git2::Signature::now(author, "author@example.com").unwrap();
+            let parents: Vec<git2::Commit> = parent
+                .iter()
+                .map(|p| repo.find_commit(*p).unwrap())
+                .collect();
+            let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+            parent = Some(
+                repo.commit(Some("HEAD"), &sig, &sig, "c", &tree, &parent_refs)
+                    .unwrap(),
+            );
+        }
+
+        let args = ContributorReportArgs {
+            path: temp_dir.path().join("src"),
+            since: None,
+            decay: 0.01,
+            output: ContributorReportOutputFormat::Table,
+            ci_output: None,
+            output_file: None,
+        };
+        let data = ContributorReportRule::new()
+            .analyze(&args)
+            .expect("a subdirectory of the repository should be analysable");
+
+        let contributors: Vec<(&str, u32)> = data
+            .stats
+            .iter()
+            .map(|s| (s.author.as_str(), s.commit_count))
+            .collect();
+        assert_eq!(contributors, [("Ada", 1)]);
     }
 
     #[test]
@@ -729,16 +841,6 @@ mod tests {
             result.is_ok(),
             "print_table should not panic when given valid stats"
         );
-    }
-
-    #[test]
-    fn test_contributor_stats_with_zero_values() {
-        let stats = ContributorStats::new("Zero Hero".to_string());
-        assert_eq!(stats.commit_count, 0, "commit_count should be 0");
-        assert_eq!(stats.lines_added, 0, "lines_added should be 0");
-        assert_eq!(stats.lines_deleted, 0, "lines_deleted should be 0");
-        assert_eq!(stats.files_touched, 0, "files_touched should be 0");
-        assert_eq!(stats.score, 0.0, "score should be 0.0");
     }
 
     #[test]

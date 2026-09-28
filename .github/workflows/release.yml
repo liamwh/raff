@@ -57,9 +57,15 @@ jobs:
             echo "version=${version}"
           } >> "${GITHUB_OUTPUT}"
 
+  test:
+    name: Test
+    needs: guard
+    if: needs.guard.outputs.should_release == 'true'
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: Build ${{ matrix.target }}
-    needs: guard
+    needs: [guard, test]
     if: needs.guard.outputs.should_release == 'true'
     runs-on: ${{ matrix.os }}
     strategy:

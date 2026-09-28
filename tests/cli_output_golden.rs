@@ -24,7 +24,7 @@ fn test_cli_single_error_finding() {
         message: "Component 'src' has 5000 statements (25%), exceeding threshold of 20%"
             .to_string(),
         location: Some(Location::new("src/main.rs".to_string())),
-        help_uri: Some("https://github.com/liamwh/raff/docs/statement-count".to_string()),
+        help_uri: Some("https://github.com/liamwh/raff#statement-count".to_string()),
         fingerprint: Some("statement-count:src:20:5000".to_string()),
     }];
 
@@ -40,7 +40,7 @@ fn test_cli_warning_finding() {
         severity: Severity::Warning,
         message: "Crate 'my-crate' has high volatility: raw_score=0.85 (alpha=0.01)".to_string(),
         location: None,
-        help_uri: Some("https://github.com/liamwh/raff/docs/volatility".to_string()),
+        help_uri: Some("https://github.com/liamwh/raff#volatility".to_string()),
         fingerprint: Some("volatility:my-crate:0.01:0.85".to_string()),
     }];
 
@@ -75,7 +75,7 @@ fn test_cli_multiple_findings_same_rule() {
             message: "Component 'src' has 5000 statements (25%), exceeding threshold of 20%"
                 .to_string(),
             location: Some(Location::new("src/main.rs".to_string())),
-            help_uri: Some("https://github.com/liamwh/raff/docs/statement-count".to_string()),
+            help_uri: Some("https://github.com/liamwh/raff#statement-count".to_string()),
             fingerprint: Some("statement-count:src:20:5000".to_string()),
         },
         Finding {
@@ -85,7 +85,7 @@ fn test_cli_multiple_findings_same_rule() {
             message: "Component 'tests' has 3000 statements (15%), exceeding threshold of 10%"
                 .to_string(),
             location: Some(Location::new("tests/integration_test.rs".to_string())),
-            help_uri: Some("https://github.com/liamwh/raff/docs/statement-count".to_string()),
+            help_uri: Some("https://github.com/liamwh/raff#statement-count".to_string()),
             fingerprint: Some("statement-count:tests:10:3000".to_string()),
         },
     ];
@@ -104,7 +104,7 @@ fn test_cli_multiple_findings_different_rules() {
             message: "Component 'src' has 5000 statements (25%), exceeding threshold of 20%"
                 .to_string(),
             location: Some(Location::new("src/main.rs".to_string())),
-            help_uri: Some("https://github.com/liamwh/raff/docs/statement-count".to_string()),
+            help_uri: Some("https://github.com/liamwh/raff#statement-count".to_string()),
             fingerprint: Some("statement-count:src:20:5000".to_string()),
         },
         Finding {
@@ -114,17 +114,17 @@ fn test_cli_multiple_findings_different_rules() {
             message: "Crate 'my-crate' has high volatility: raw_score=0.85 (alpha=0.01)"
                 .to_string(),
             location: None,
-            help_uri: Some("https://github.com/liamwh/raff/docs/volatility".to_string()),
+            help_uri: Some("https://github.com/liamwh/raff#volatility".to_string()),
             fingerprint: Some("volatility:my-crate:0.01:0.85".to_string()),
         },
         Finding {
             rule_id: "coupling".to_string(),
             rule_name: "Coupling Rule".to_string(),
             severity: Severity::Warning,
-            message: "Crate 'api' has high instability: Ce=15, Ca=5, I=0.75".to_string(),
+            message: "Crate 'domain' (I=0.25) depends on less stable crate 'api' (I=0.75), violating the Stable Dependencies Principle".to_string(),
             location: None,
-            help_uri: Some("https://github.com/liamwh/raff/docs/coupling".to_string()),
-            fingerprint: Some("coupling:api:15:5".to_string()),
+            help_uri: Some("https://github.com/liamwh/raff#module-coupling".to_string()),
+            fingerprint: Some("coupling-sdp:domain:api".to_string()),
         },
     ];
 
@@ -177,7 +177,7 @@ fn test_cli_finding_with_line_range() {
         message: "Function 'process_data' has high cyclomatic complexity: 15 (threshold: 10)"
             .to_string(),
         location: Some(Location::with_lines("src/processor.rs".to_string(), 42, 89)),
-        help_uri: Some("https://github.com/liamwh/raff/docs/rust-code-analysis".to_string()),
+        help_uri: Some("https://github.com/liamwh/raff#rust-code-analysis".to_string()),
         fingerprint: Some("rca:process_data:15".to_string()),
     }];
 
@@ -186,8 +186,8 @@ fn test_cli_finding_with_line_range() {
 }
 
 #[test]
-fn test_cli_long_message_truncation() {
-    let long_message = "This is a very long message that should be truncated because it exceeds the maximum message column width in the CLI table output format and needs to be shortened to fit within the terminal display.";
+fn test_cli_long_message_in_full() {
+    let long_message = "This is a very long message that used to be truncated because it exceeds the width of the message column in the CLI table output format, and must now be printed in full.";
     let findings = vec![Finding {
         rule_id: "test-rule".to_string(),
         rule_name: "Test Rule".to_string(),
@@ -226,7 +226,7 @@ fn test_cli_finding_without_location() {
         severity: Severity::Warning,
         message: "Crate 'utils' has high volatility".to_string(),
         location: None,
-        help_uri: Some("https://github.com/liamwh/raff/docs/volatility".to_string()),
+        help_uri: Some("https://github.com/liamwh/raff#volatility".to_string()),
         fingerprint: None,
     }];
 

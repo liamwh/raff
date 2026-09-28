@@ -12,8 +12,10 @@
 //!
 //! # Cache Storage
 //!
-//! Cache entries are stored in `~/.cache/raff/` or a local `.raff-cache/` directory.
-//! Each entry is serialized using `bincode` for efficient storage and retrieval.
+//! Cache entries are stored in `~/.cache/raff/` (or `$RAFF_CACHE_DIR` when set) or a
+//! local `.raff-cache/` directory. Each entry is serialized using `bincode` for
+//! efficient storage and retrieval. A payload that no longer decodes, for example one
+//! written by an older raff, counts as a cache miss.
 //!
 //! # Cache Invalidation
 //!
@@ -21,7 +23,7 @@
 //! - The source file content changes
 //! - Git HEAD changes (for Git-based analysis)
 //! - Analysis parameters change
-//! - The `--no-cache` flag is used
+//! - The `--no-cache` flag is used (see [`disable_caching`])
 //! - The `--clear-cache` flag is used
 //!
 //! # Usage
@@ -54,10 +56,12 @@
 //! ```
 
 use crate::error::{RaffError, Result};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Default cache directory name when using local cache.
@@ -74,6 +78,20 @@ const MAX_CACHE_AGE_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 /// Cache entry format version - increment when CacheEntry or serialization format changes
 const CACHE_ENTRY_VERSION: u32 = 1;
+
+/// Environment variable that overrides the global cache directory.
+const CACHE_DIR_ENV: &str = "RAFF_CACHE_DIR";
+
+/// Set once by [`disable_caching`]; every `CacheManager` created afterwards is disabled.
+static CACHING_DISABLED: AtomicBool = AtomicBool::new(false);
+
+/// Disables caching for every `CacheManager` created afterwards in this process.
+///
+/// The CLI calls this for `--no-cache`, so rules neither read nor write cache
+/// entries, whether they run on their own or through `all`.
+pub fn disable_caching() {
+    CACHING_DISABLED.store(true, Ordering::Relaxed);
+}
 
 /// A cache key that uniquely identifies an analysis operation.
 ///
@@ -165,6 +183,24 @@ impl CacheKey {
         }
         let content_hash = format!("{:x}", hasher.finalize());
         Ok(Self::new(content_hash, git_head, parameters))
+    }
+
+    /// Creates a cache key from named contents. Each path and its content feed the
+    /// hash, so editing, renaming or moving a file changes the key.
+    #[must_use]
+    pub fn from_contents<'a>(
+        contents: impl IntoIterator<Item = (&'a Path, &'a [u8])>,
+        git_head: Option<String>,
+        parameters: Vec<(String, String)>,
+    ) -> Self {
+        let mut hasher = Sha256::new();
+        for (path, content) in contents {
+            hasher.update(path.as_os_str().as_encoded_bytes());
+            hasher.update([0]);
+            hasher.update(content);
+            hasher.update([0]);
+        }
+        Self::new(format!("{:x}", hasher.finalize()), git_head, parameters)
     }
 
     /// Returns a string representation of this cache key for use as a filename.
@@ -283,13 +319,14 @@ pub struct CacheManager {
 }
 
 impl CacheManager {
-    /// Creates a new cache manager with the default global cache directory.
+    /// Creates a new cache manager with the global cache directory: `$RAFF_CACHE_DIR`
+    /// when set, otherwise `~/.cache/raff/`.
     ///
     /// # Errors
     ///
     /// Returns an error if the cache directory cannot be created.
     pub fn new() -> Result<Self> {
-        Self::with_dir(None)
+        Self::with_dir(std::env::var_os(CACHE_DIR_ENV).map(PathBuf::from))
     }
 
     /// Creates a new cache manager with a specific cache directory.
@@ -311,14 +348,16 @@ impl CacheManager {
                 .unwrap_or_else(|| PathBuf::from(LOCAL_CACHE_DIR))
         });
 
-        // Create cache directory if it doesn't exist
-        fs::create_dir_all(&dir).map_err(|e| {
-            RaffError::io_error_with_source("create cache directory", dir.clone(), e)
-        })?;
+        let enabled = !CACHING_DISABLED.load(Ordering::Relaxed);
+        if enabled {
+            fs::create_dir_all(&dir).map_err(|e| {
+                RaffError::io_error_with_source("create cache directory", dir.clone(), e)
+            })?;
+        }
 
         Ok(Self {
             cache_dir: dir,
-            enabled: true,
+            enabled,
         })
     }
 
@@ -412,6 +451,43 @@ impl CacheManager {
                 Ok(None)
             }
         }
+    }
+
+    /// Retrieves the entry for `key` and decodes its payload.
+    ///
+    /// A payload that fails to decode (written by an older format, truncated or
+    /// corrupted) is treated as a miss: the entry is removed and `None` returned.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the cache file cannot be read.
+    pub fn get_decoded<T: DeserializeOwned>(&self, key: &CacheKey) -> Result<Option<T>> {
+        let Some(entry) = self.get(key)? else {
+            return Ok(None);
+        };
+        match bincode::deserialize(&entry.data) {
+            Ok(value) => Ok(Some(value)),
+            Err(e) => {
+                tracing::debug!(error = %e, "Cached payload failed to decode; treating as a miss");
+                let _ = fs::remove_file(self.cache_path(key));
+                Ok(None)
+            }
+        }
+    }
+
+    /// Encodes `value` and stores it under `key`. Does nothing when caching is disabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the value cannot be serialized or the entry cannot be written.
+    pub fn put_encoded<T: Serialize>(&self, key: &CacheKey, value: &T) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        let data = bincode::serialize(value).map_err(|e| {
+            RaffError::parse_error(format!("Failed to serialize cache payload: {}", e))
+        })?;
+        self.put(key, CacheEntry::new(data))
     }
 
     /// Stores a cache entry for the given key.

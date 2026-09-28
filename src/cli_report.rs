@@ -10,27 +10,6 @@
 use crate::ci_report::{Finding, Severity};
 use prettytable::{Attr, Cell, Row, Table, format};
 
-/// Maximum width for the message column before truncation.
-const MAX_MESSAGE_WIDTH: usize = 60;
-
-/// Truncates a message to fit within the maximum width.
-///
-/// # Arguments
-///
-/// * `message` - The message to truncate
-///
-/// # Returns
-///
-/// A truncated message with "..." appended if it was too long.
-#[must_use]
-fn truncate_message(message: &str) -> String {
-    if message.len() > MAX_MESSAGE_WIDTH {
-        format!("{}...", &message[..MAX_MESSAGE_WIDTH.saturating_sub(3)])
-    } else {
-        message.to_string()
-    }
-}
-
 /// Returns a shorthand severity label for display.
 ///
 /// # Arguments
@@ -81,7 +60,7 @@ const fn severity_label(severity: Severity) -> &'static str {
 /// ];
 ///
 /// let summary = render_summary_line(&findings);
-/// assert_eq!(summary, "1 findings (1 error, 0 warnings, 0 notes)");
+/// assert_eq!(summary, "1 finding (1 error, 0 warnings, 0 notes)");
 /// ```
 #[must_use]
 pub fn render_summary_line(findings: &[Finding]) -> String {
@@ -136,7 +115,9 @@ const fn severity_color(severity: Severity) -> Attr {
 /// - One row per finding
 /// - Columns: Severity | Rule | Location | Message | Action
 /// - Color-coded by severity (red=Error, yellow=Warning, blue=Note)
-/// - Truncates long messages to fit terminal width
+/// - Prints each message in full: the message is what a developer or coding
+///   agent needs to act on, so it is never cut
+/// - Followed by a one-line summary (see [`render_summary_line`])
 ///
 /// # Arguments
 ///
@@ -232,100 +213,21 @@ pub fn render_cli_table(findings: &[Finding]) -> String {
                 .with_style(severity_color(finding.severity)),
             Cell::new(&finding.rule_id),
             Cell::new(location),
-            Cell::new(&truncate_message(&finding.message)),
+            Cell::new(&finding.message),
             Cell::new(action),
         ]));
     }
 
-    // Add summary row
-    let error_count = findings
-        .iter()
-        .filter(|f| f.severity == Severity::Error)
-        .count();
-    let warning_count = findings
-        .iter()
-        .filter(|f| f.severity == Severity::Warning)
-        .count();
-    let note_count = findings
-        .iter()
-        .filter(|f| f.severity == Severity::Note)
-        .count();
-    let total = findings.len();
-
-    if total > 0 {
-        table.add_row(Row::new(vec![
-            Cell::new(""),
-            Cell::new(""),
-            Cell::new(""),
-            Cell::new(""),
-            Cell::new(""),
-        ]));
-        table.add_row(Row::new(vec![
-            Cell::new(&format!(
-                "Summary: {} issue{} ({} error{}, {} warning{}, {} note{})",
-                total,
-                if total == 1 { "" } else { "s" },
-                error_count,
-                if error_count == 1 { "" } else { "s" },
-                warning_count,
-                if warning_count == 1 { "" } else { "s" },
-                note_count,
-                if note_count == 1 { "" } else { "s" },
-            ))
-            .with_style(Attr::Bold),
-            Cell::new(""),
-            Cell::new(""),
-            Cell::new(""),
-            Cell::new(""),
-        ]));
+    if findings.is_empty() {
+        return table.to_string();
     }
-
-    table.to_string()
+    format!("{table}{}", render_summary_line(findings))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ci_report::Location;
-
-    #[test]
-    fn test_truncate_message_short() {
-        let message = "Short message";
-        let truncated = truncate_message(message);
-        assert_eq!(
-            truncated, "Short message",
-            "Short messages should not be truncated"
-        );
-    }
-
-    #[test]
-    fn test_truncate_message_at_limit() {
-        let message = "a".repeat(MAX_MESSAGE_WIDTH);
-        let truncated = truncate_message(&message);
-        assert_eq!(
-            truncated.len(),
-            MAX_MESSAGE_WIDTH,
-            "Message at limit should not be truncated"
-        );
-        assert!(
-            !truncated.contains("..."),
-            "Message at limit should not have ellipsis"
-        );
-    }
-
-    #[test]
-    fn test_truncate_message_over_limit() {
-        let message = "a".repeat(MAX_MESSAGE_WIDTH + 10);
-        let truncated = truncate_message(&message);
-        assert!(
-            truncated.len() <= MAX_MESSAGE_WIDTH,
-            "Truncated message should be at most MAX_MESSAGE_WIDTH"
-        );
-        assert!(
-            truncated.ends_with("..."),
-            "Truncated message should end with ellipsis"
-        );
-    }
 
     #[test]
     fn test_severity_label() {
@@ -371,7 +273,7 @@ mod tests {
             "Output should contain message"
         );
         assert!(
-            output.contains("Summary: 1 issue"),
+            output.contains("1 finding (1 error"),
             "Output should contain summary"
         );
     }
@@ -413,7 +315,7 @@ mod tests {
         assert!(output.contains("WARN"), "Output should contain WARN label");
         assert!(output.contains("NOTE"), "Output should contain NOTE label");
         assert!(
-            output.contains("Summary: 3 issues"),
+            output.contains("3 findings"),
             "Output should contain correct summary"
         );
         assert!(
@@ -431,11 +333,13 @@ mod tests {
     }
 
     #[test]
-    fn test_render_cli_table_long_message_truncated() {
-        let long_message = "This is a very long message that should be truncated because it exceeds the maximum width of the message column in the CLI table output format.";
+    fn test_render_cli_table_prints_long_message_in_full() {
+        // The end of an SDP message names the crate to fix; cutting it makes
+        // the finding unactionable.
+        let long_message = "Crate 'helix-tui' (I=0.67) depends on less stable crate 'helix-view' (I=0.70), violating the Stable Dependencies Principle";
         let findings = vec![Finding {
-            rule_id: "test-rule".to_string(),
-            rule_name: "Test Rule".to_string(),
+            rule_id: "coupling".to_string(),
+            rule_name: "Code Coupling Rule".to_string(),
             severity: Severity::Warning,
             message: long_message.to_string(),
             location: None,
@@ -445,8 +349,8 @@ mod tests {
 
         let output = render_cli_table(&findings);
         assert!(
-            output.contains("..."),
-            "Long message should be truncated with ellipsis"
+            output.contains(long_message),
+            "Long message should appear in full, got:\n{output}"
         );
     }
 
@@ -503,13 +407,13 @@ mod tests {
             severity: Severity::Error,
             message: "Component too large".to_string(),
             location: Some(Location::new("src/main.rs".to_string())),
-            help_uri: Some("https://github.com/liamwh/raff/docs/statement-count".to_string()),
+            help_uri: Some("https://github.com/liamwh/raff#statement-count".to_string()),
             fingerprint: None,
         }];
 
         let output = render_cli_table(&findings);
         assert!(
-            output.contains("https://github.com/liamwh/raff/docs/statement-count"),
+            output.contains("https://github.com/liamwh/raff#statement-count"),
             "Output should contain help URI in Action column"
         );
     }

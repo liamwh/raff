@@ -13,6 +13,17 @@
 //! - **Ca (Afferent Coupling)**: The number of other components that depend on this component
 //! - **I (Instability)**: Ce / (Ce + Ca) — ranges from 0 (stable) to 1 (unstable)
 //!
+//! # Findings: the Stable Dependencies Principle
+//!
+//! Instability on its own is not a problem: binaries and other entry-point crates
+//! are expected to sit at or near `I = 1`. What matters is the direction of each
+//! dependency. Following Robert C. Martin's Stable Dependencies Principle, a crate
+//! should only depend on crates that are at least as stable as itself. For every
+//! workspace-internal edge `A -> B`, the rule emits a warning when `I(B) > I(A)`.
+//! Crates with no coupling at all (`Ce + Ca == 0`) are treated as `I = 0`.
+//! With `--staged`, instability still comes from the whole workspace graph, but only
+//! edges where either crate has staged changes are reported.
+//!
 //! # Granularity Levels
 //!
 //! The analysis can be performed at three levels:
@@ -66,7 +77,8 @@
 //!
 //! At the crate level, the rule uses `cargo metadata` to analyze the dependency graph
 //! of workspace crates. It identifies which crates depend on which other crates within
-//! the workspace.
+//! the workspace. Normal and build dependencies count as edges; dev-dependencies do
+//! not, because they only serve tests, examples and benches.
 //!
 //! # Module-Level Analysis
 //!
@@ -82,6 +94,7 @@
 //! - `cargo metadata` fails to execute or returns invalid output
 //! - Git operations fail for repository-level analysis
 
+use crate::cargo_workspace::{CargoMetadata, Package};
 use crate::ci_report::{Finding, Severity, ToFindings};
 use crate::cli::{CiOutputFormat, CouplingArgs, CouplingGranularity, CouplingOutputFormat};
 use crate::error::{RaffError, Result};
@@ -95,44 +108,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use syn::{ExprPath, Item, ItemMod, ItemUse, PatType, visit::Visit};
 use walkdir::WalkDir;
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct CargoMetadata {
-    packages: Vec<Package>,
-    workspace_members: Vec<String>,
-    resolve: Option<Resolve>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct Package {
-    id: String,
-    name: String,
-    dependencies: Vec<Dependency>,
-    manifest_path: String,
-}
-
-#[derive(Debug, Deserialize, Eq, PartialEq, Hash, Clone)]
-#[allow(dead_code)]
-struct PkgId(String);
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct Dependency {
-    name: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct Resolve {
-    nodes: Vec<ResolveNode>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct ResolveNode {
-    id: String,
-    dependencies: Vec<String>,
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CrateLevelAnalysisResult {
@@ -161,46 +138,108 @@ pub struct ModuleCoupling {
 
 #[derive(Serialize, Debug, Default)]
 pub struct CouplingData {
+    /// Crates shown in the report; in staged mode only the affected ones.
     pub crates: Vec<CrateCoupling>,
     pub granularity: CouplingGranularity,
     pub analysis_path: PathBuf,
+    /// Stable Dependencies Principle violations, evaluated over the whole workspace
+    /// graph (see [`find_sdp_violations`]).
+    #[serde(skip)]
+    pub sdp_violations: Vec<SdpViolation>,
+}
+
+impl CrateCoupling {
+    /// Instability `I = Ce / (Ce + Ca)`; a crate with no coupling at all has `I = 0`.
+    pub fn instability(&self) -> f64 {
+        let total_coupling = self.ce + self.ca;
+        if total_coupling == 0 {
+            0.0
+        } else {
+            self.ce as f64 / total_coupling as f64
+        }
+    }
+}
+
+/// A workspace edge `dependant -> dependency` where the dependency is less stable
+/// than the crate depending on it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SdpViolation {
+    pub dependant: String,
+    pub dependant_instability: f64,
+    pub dependency: String,
+    pub dependency_instability: f64,
+}
+
+/// Finds violations of the Stable Dependencies Principle: for every workspace-internal
+/// edge `A -> B`, `B` should be at least as stable as `A` (`I(B) <= I(A)`). A high
+/// instability on its own is not reported, as entry points such as binaries are
+/// expected to be maximally unstable.
+///
+/// `crates` must be the whole workspace graph so that instability uses the full Ce and
+/// Ca. When `affected` is set (staged mode), only edges where `A` or `B` is affected
+/// are kept. Violations are sorted by dependant, then dependency.
+pub fn find_sdp_violations<'a>(
+    crates: impl IntoIterator<Item = &'a CrateCoupling>,
+    affected: Option<&HashSet<String>>,
+) -> Vec<SdpViolation> {
+    let crates: Vec<&CrateCoupling> = crates.into_iter().collect();
+    let instability_by_crate: HashMap<&str, f64> = crates
+        .iter()
+        .map(|krate| (krate.name.as_str(), krate.instability()))
+        .collect();
+    let is_reported = |dependant: &str, dependency: &str| {
+        affected
+            .is_none_or(|affected| affected.contains(dependant) || affected.contains(dependency))
+    };
+
+    let mut violations = Vec::new();
+    for krate in crates {
+        let dependant_instability = instability_by_crate[krate.name.as_str()];
+        for dependency in &krate.dependencies {
+            let Some(&dependency_instability) = instability_by_crate.get(dependency.as_str())
+            else {
+                continue;
+            };
+            if dependency_instability > dependant_instability + 1e-9
+                && is_reported(&krate.name, dependency)
+            {
+                violations.push(SdpViolation {
+                    dependant: krate.name.clone(),
+                    dependant_instability,
+                    dependency: dependency.clone(),
+                    dependency_instability,
+                });
+            }
+        }
+    }
+    violations.sort_by(|a, b| (&a.dependant, &a.dependency).cmp(&(&b.dependant, &b.dependency)));
+    violations
 }
 
 impl ToFindings for CouplingData {
     #[tracing::instrument(skip(self), fields(rule_id = "coupling"))]
     fn to_findings(&self) -> Vec<Finding> {
-        let mut findings = Vec::new();
-
-        // Generate findings for crates with high instability (I > 0.7)
-        // Instability I = Ce / (Ce + Ca)
-        // I > 0.7 means the crate is highly unstable (depends on many others, few depend on it)
-        for crate_data in &self.crates {
-            let total_coupling = crate_data.ce + crate_data.ca;
-            if total_coupling > 0 {
-                let instability = crate_data.ce as f64 / total_coupling as f64;
-                if instability > 0.7 {
-                    findings.push(Finding {
-                        rule_id: "coupling".to_string(),
-                        rule_name: "Code Coupling Rule".to_string(),
-                        severity: Severity::Warning,
-                        message: format!(
-                            "Crate '{}' has high instability ({:.2}): Ce={} (outgoing dependencies), Ca={} (incoming dependents)",
-                            crate_data.name, instability, crate_data.ce, crate_data.ca
-                        ),
-                        location: None, // Coupling is crate-level, no specific file location
-                        help_uri: Some(
-                            "https://github.com/liamwh/raff/docs/coupling".to_string(),
-                        ),
-                        fingerprint: Some(format!(
-                            "coupling:{}:{}:{}",
-                            crate_data.name, crate_data.ce, crate_data.ca
-                        )),
-                    });
-                }
-            }
-        }
-
-        findings
+        self.sdp_violations
+            .iter()
+            .map(|violation| Finding {
+                rule_id: "coupling".to_string(),
+                rule_name: "Code Coupling Rule".to_string(),
+                severity: Severity::Warning,
+                message: format!(
+                    "Crate '{}' (I={:.2}) depends on less stable crate '{}' (I={:.2}), violating the Stable Dependencies Principle",
+                    violation.dependant,
+                    violation.dependant_instability,
+                    violation.dependency,
+                    violation.dependency_instability
+                ),
+                location: None, // Coupling is crate-level, no specific file location
+                help_uri: Some("https://github.com/liamwh/raff#module-coupling".to_string()),
+                fingerprint: Some(format!(
+                    "coupling-sdp:{}:{}",
+                    violation.dependant, violation.dependency
+                )),
+            })
+            .collect()
     }
 }
 
@@ -291,7 +330,7 @@ impl CouplingRule {
             CouplingOutputFormat::Html => {
                 let html_body = self.render_coupling_html_body(&full_report)?;
                 let full_html = html_utils::render_html_doc(
-                    &format!("Coupling Report: {}", &full_report.analysis_path.display()),
+                    &format!("Coupling Report: {}", full_report.analysis_path.display()),
                     html_body,
                 );
                 println!("{full_html}");
@@ -320,6 +359,11 @@ impl CouplingRule {
             crates: Vec::new(),
             granularity: args.granularity.clone(),
             analysis_path: args.path.clone(),
+            // Instability needs the full Ce/Ca, so the check always sees every crate.
+            sdp_violations: find_sdp_violations(
+                crate_couplings_map.values(),
+                affected_crates.as_ref(),
+            ),
         };
 
         if let Some(affected_crates) = affected_crates.as_ref()
@@ -355,18 +399,14 @@ impl CouplingRule {
                     args.granularity,
                     CouplingGranularity::Module | CouplingGranularity::Both
                 ) {
-                    let manifest_path = PathBuf::from(&pkg_data.manifest_path);
-                    if let Some(crate_root_dir) = manifest_path.parent() {
-                        let src_path = crate_root_dir.join("src");
-                        if src_path.exists() {
-                            let mut module_couplings = self
-                                .analyze_module_level_coupling_for_crate(
-                                    crate_name, &src_path, pkg_data,
-                                )?;
-                            module_couplings
-                                .sort_by_key(|item| std::cmp::Reverse(item.ce_m + item.ca_m));
-                            current_crate_coupling.modules = module_couplings;
-                        }
+                    let src_path = pkg_data.manifest_dir().join("src");
+                    if src_path.exists() {
+                        let mut module_couplings = self.analyze_module_level_coupling_for_crate(
+                            crate_name, &src_path, pkg_data,
+                        )?;
+                        module_couplings
+                            .sort_by_key(|item| std::cmp::Reverse(item.ce_m + item.ca_m));
+                        current_crate_coupling.modules = module_couplings;
                     }
                 }
                 full_report.crates.push(current_crate_coupling);
@@ -413,23 +453,7 @@ impl CouplingRule {
             analysis_path.display()
         );
 
-        let metadata_output = Command::new("cargo")
-            .arg("metadata")
-            .arg("--format-version")
-            .arg("1")
-            .arg("--locked")
-            .arg("--no-deps")
-            .current_dir(analysis_path)
-            .output()?;
-        if !metadata_output.status.success() {
-            let stderr = String::from_utf8_lossy(&metadata_output.stderr);
-            return Err(RaffError::parse_error(format!(
-                "cargo metadata failed: {}",
-                stderr
-            )));
-        }
-        let metadata_json = String::from_utf8_lossy(&metadata_output.stdout);
-        let metadata: CargoMetadata = serde_json::from_str(&metadata_json)?;
+        let metadata = CargoMetadata::load(analysis_path)?;
 
         let workspace_member_ids: HashSet<_> = metadata.workspace_members.iter().cloned().collect();
         let mut package_id_to_name: HashMap<String, String> = HashMap::new();
@@ -442,98 +466,44 @@ impl CouplingRule {
             }
         }
 
-        let mut efferent_couplings: HashMap<String, usize> = HashMap::new();
-        let mut afferent_couplings: HashMap<String, usize> = HashMap::new();
+        let workspace_package_names: HashSet<&str> = workspace_packages_map
+            .values()
+            .map(|package| package.name.as_str())
+            .collect();
         let mut crate_couplings_map: HashMap<String, CrateCoupling> = HashMap::new();
-
-        for pkg_id in &workspace_member_ids {
-            if let Some(name) = package_id_to_name.get(pkg_id) {
-                efferent_couplings.insert(name.clone(), 0);
-                afferent_couplings.insert(name.clone(), 0);
-                crate_couplings_map.insert(
-                    name.clone(),
-                    CrateCoupling {
-                        name: name.clone(),
-                        ce: 0,
-                        ca: 0,
-                        modules: Vec::new(),
-                        dependencies: HashSet::new(),
-                    },
-                );
-            }
-        }
-
-        if let Some(resolve_data) = &metadata.resolve {
-            let resolve_nodes_map: HashMap<_, _> = resolve_data
-                .nodes
+        for package in workspace_packages_map.values() {
+            // Dev-dependencies only serve tests, examples and benches; they are not
+            // part of the architecture, so only normal and build edges count.
+            let dependencies = package
+                .dependencies
                 .iter()
-                .map(|n| (n.id.clone(), n))
+                .filter(|dep| dep.kind.as_deref() != Some("dev"))
+                .filter(|dep| {
+                    dep.name != package.name && workspace_package_names.contains(dep.name.as_str())
+                })
+                .map(|dep| dep.name.clone())
                 .collect();
-            for origin_pkg_id_str in workspace_packages_map.keys() {
-                let origin_pkg_name = match package_id_to_name.get(origin_pkg_id_str) {
-                    Some(name) => name,
-                    None => continue,
-                };
-                if let Some(resolve_node) = resolve_nodes_map.get(origin_pkg_id_str) {
-                    for dep_pkg_id_str in &resolve_node.dependencies {
-                        if workspace_member_ids.contains(dep_pkg_id_str) {
-                            let target_pkg_name = match package_id_to_name.get(dep_pkg_id_str) {
-                                Some(name) => name,
-                                None => continue,
-                            };
-                            if origin_pkg_name != target_pkg_name {
-                                *efferent_couplings
-                                    .entry(origin_pkg_name.clone())
-                                    .or_insert(0) += 1;
-                                *afferent_couplings
-                                    .entry(target_pkg_name.clone())
-                                    .or_insert(0) += 1;
-                                if let Some(coupling_data) =
-                                    crate_couplings_map.get_mut(origin_pkg_name)
-                                {
-                                    coupling_data.dependencies.insert(target_pkg_name.clone());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            tracing::debug!(
-                "cargo metadata did not include a resolve graph; using dependency-list fallback"
+            crate_couplings_map.insert(
+                package.name.clone(),
+                CrateCoupling {
+                    name: package.name.clone(),
+                    ce: 0,
+                    ca: 0,
+                    modules: Vec::new(),
+                    dependencies,
+                },
             );
-            let workspace_package_names_to_ids: HashMap<String, String> = workspace_packages_map
-                .values()
-                .map(|p| (p.name.clone(), p.id.clone()))
-                .collect();
-            for (origin_pkg_id_str, origin_pkg_data) in &workspace_packages_map {
-                let origin_pkg_name = &origin_pkg_data.name;
-                for dep in &origin_pkg_data.dependencies {
-                    if let Some(target_pkg_id_str) = workspace_package_names_to_ids.get(&dep.name)
-                        && origin_pkg_id_str != target_pkg_id_str
-                    {
-                        let target_pkg_name = workspace_packages_map
-                            .values()
-                            .find(|p| &p.id == target_pkg_id_str)
-                            .map(|p| &p.name)
-                            .unwrap_or_else(|| &dep.name);
-                        *efferent_couplings
-                            .entry(origin_pkg_name.clone())
-                            .or_insert(0) += 1;
-                        *afferent_couplings
-                            .entry(target_pkg_name.clone())
-                            .or_insert(0) += 1;
-                        if let Some(coupling_data) = crate_couplings_map.get_mut(origin_pkg_name) {
-                            coupling_data.dependencies.insert(target_pkg_name.clone());
-                        }
-                    }
-                }
-            }
         }
 
+        let mut afferent_couplings: HashMap<String, usize> = HashMap::new();
+        for coupling_data in crate_couplings_map.values() {
+            for dependency in &coupling_data.dependencies {
+                *afferent_couplings.entry(dependency.clone()).or_insert(0) += 1;
+            }
+        }
         for (name, coupling_data) in crate_couplings_map.iter_mut() {
-            coupling_data.ce = *efferent_couplings.get(name).unwrap_or(&0);
-            coupling_data.ca = *afferent_couplings.get(name).unwrap_or(&0);
+            coupling_data.ce = coupling_data.dependencies.len();
+            coupling_data.ca = afferent_couplings.get(name).copied().unwrap_or(0);
         }
 
         Ok(CrateLevelAnalysisResult {
@@ -555,10 +525,7 @@ impl CouplingRule {
 
         let mut affected = HashSet::new();
         for package in workspace_packages_map.values() {
-            let manifest_path = PathBuf::from(&package.manifest_path);
-            let Some(package_dir) = manifest_path.parent() else {
-                continue;
-            };
+            let package_dir = package.manifest_dir();
             let canonical_package_dir = package_dir
                 .canonicalize()
                 .unwrap_or_else(|_| package_dir.to_path_buf());
@@ -773,7 +740,7 @@ impl CouplingRule {
                     }
                     tbody {
                         @for krate in &report.crates {
-                            @let instability = if (krate.ce + krate.ca) > 0 { krate.ce as f64 / (krate.ce + krate.ca) as f64 } else { 0.0 };
+                            @let instability = krate.instability();
                             @let distance = (instability - 1.0).abs();
                             @let ce_style = html_utils::get_cell_style(krate.ce as f64, max_coupling / 2.0, max_coupling, false);
                             @let ca_style = html_utils::get_cell_style(krate.ca as f64, max_coupling / 2.0, max_coupling, false);
@@ -1400,6 +1367,7 @@ mod tests {
             crates: Vec::new(),
             granularity: CouplingGranularity::Crate,
             analysis_path: PathBuf::from("/test/path"),
+            sdp_violations: Vec::new(),
         };
         assert!(data.crates.is_empty());
         assert_eq!(data.granularity, CouplingGranularity::Crate);
@@ -1460,6 +1428,7 @@ mod tests {
             }],
             granularity: CouplingGranularity::Crate,
             analysis_path: PathBuf::from("/test/path"),
+            sdp_violations: Vec::new(),
         };
         let json = serde_json::to_string(&data);
         assert!(json.is_ok(), "CouplingData should be serializable to JSON");
@@ -1510,6 +1479,7 @@ mod tests {
             }],
             granularity: CouplingGranularity::Module,
             analysis_path: PathBuf::from("/test/path"),
+            sdp_violations: Vec::new(),
         };
         let yaml = serde_yaml::to_string(&data);
         assert!(yaml.is_ok(), "CouplingData should be serializable to YAML");
@@ -1579,6 +1549,7 @@ mod tests {
             }],
             granularity: CouplingGranularity::Crate,
             analysis_path: PathBuf::from("/test/path"),
+            sdp_violations: Vec::new(),
         };
         let result = rule.render_coupling_html_body(&report);
         assert!(result.is_ok(), "HTML rendering should succeed");
@@ -1612,6 +1583,7 @@ mod tests {
             }],
             granularity: CouplingGranularity::Module,
             analysis_path: PathBuf::from("/test/path"),
+            sdp_violations: Vec::new(),
         };
         let result = rule.render_coupling_html_body(&report);
         assert!(result.is_ok());
@@ -1637,6 +1609,7 @@ mod tests {
             }],
             granularity: CouplingGranularity::Both,
             analysis_path: PathBuf::from("/test/path"),
+            sdp_violations: Vec::new(),
         };
         let result = rule.render_coupling_html_body(&report);
         assert!(result.is_ok());
@@ -1653,6 +1626,7 @@ mod tests {
             crates: Vec::new(),
             granularity: CouplingGranularity::Crate,
             analysis_path: PathBuf::from("/test/path"),
+            sdp_violations: Vec::new(),
         };
         let result = rule.render_coupling_html_body(&report);
         assert!(result.is_ok());
@@ -1676,6 +1650,7 @@ mod tests {
             }],
             granularity: CouplingGranularity::Crate,
             analysis_path: PathBuf::from("/test/path"),
+            sdp_violations: Vec::new(),
         };
         let result = rule.generate_crate_dot(&report);
         assert!(result.is_ok(), "DOT generation should succeed");
@@ -1692,6 +1667,7 @@ mod tests {
             crates: Vec::new(),
             granularity: CouplingGranularity::Crate,
             analysis_path: PathBuf::from("/test/path"),
+            sdp_violations: Vec::new(),
         };
         let result = rule.generate_crate_dot(&report);
         assert!(result.is_ok());
@@ -1722,6 +1698,7 @@ mod tests {
             }],
             granularity: CouplingGranularity::Module,
             analysis_path: PathBuf::from("/test/path"),
+            sdp_violations: Vec::new(),
         };
         let result = rule.generate_module_dot(&report);
         assert!(result.is_ok(), "Module DOT generation should succeed");
@@ -1743,6 +1720,7 @@ mod tests {
             }],
             granularity: CouplingGranularity::Module,
             analysis_path: PathBuf::from("/test/path"),
+            sdp_violations: Vec::new(),
         };
         let result = rule.generate_module_dot(&report);
         assert!(result.is_ok());
@@ -1838,6 +1816,7 @@ mod tests {
             }],
             granularity: CouplingGranularity::Both,
             analysis_path: PathBuf::from("/test"),
+            sdp_violations: Vec::new(),
         };
         assert_eq!(data.granularity, CouplingGranularity::Both);
         assert_eq!(data.crates.len(), 1);
@@ -2033,199 +2012,179 @@ fn main() {
 
     // Tests for CI output functionality
 
-    #[test]
-    fn test_to_findings_with_no_high_instability_crates() {
-        let data = CouplingData {
-            crates: vec![CrateCoupling {
-                name: "stable_crate".to_string(),
-                ce: 2,
-                ca: 8, // I = 2/10 = 0.2 (stable, below 0.7 threshold)
-                modules: Vec::new(),
-                dependencies: HashSet::new(),
-            }],
+    fn crate_coupling(name: &str, ce: usize, ca: usize, dependencies: &[&str]) -> CrateCoupling {
+        CrateCoupling {
+            name: name.to_string(),
+            ce,
+            ca,
+            modules: Vec::new(),
+            dependencies: dependencies.iter().map(|d| d.to_string()).collect(),
+        }
+    }
+
+    fn sdp_findings(crates: &[CrateCoupling], affected: Option<&HashSet<String>>) -> Vec<Finding> {
+        CouplingData {
+            crates: Vec::new(),
             granularity: CouplingGranularity::Crate,
             analysis_path: PathBuf::from("/test"),
-        };
+            sdp_violations: find_sdp_violations(crates, affected),
+        }
+        .to_findings()
+    }
 
-        let findings = data.to_findings();
+    #[test]
+    fn test_to_findings_ignores_maximally_unstable_binary_depending_on_stable_crate() {
+        let crates = [
+            crate_coupling("server", 1, 0, &["core"]), // I = 1.0
+            crate_coupling("core", 0, 1, &[]),         // I = 0.0
+        ];
 
         assert!(
-            findings.is_empty(),
-            "to_findings should return empty when no crates have high instability"
+            sdp_findings(&crates, None).is_empty(),
+            "high instability alone must not produce a finding"
         );
     }
 
     #[test]
-    fn test_to_findings_with_high_instability_crates() {
-        let data = CouplingData {
-            crates: vec![CrateCoupling {
-                name: "unstable_crate".to_string(),
-                ce: 8,
-                ca: 2, // I = 8/10 = 0.8 (unstable, above 0.7 threshold)
-                modules: Vec::new(),
-                dependencies: {
-                    let mut deps = HashSet::new();
-                    deps.insert("dep1".to_string());
-                    deps
-                },
-            }],
-            granularity: CouplingGranularity::Crate,
-            analysis_path: PathBuf::from("/test"),
-        };
+    fn test_to_findings_reports_stable_crate_depending_on_less_stable_crate() {
+        let crates = [
+            crate_coupling("core", 1, 4, &["plugin"]), // I = 0.20
+            crate_coupling("plugin", 3, 1, &[]),       // I = 0.75
+        ];
 
-        let findings = data.to_findings();
+        let findings = sdp_findings(&crates, None);
 
-        assert!(
-            !findings.is_empty(),
-            "to_findings should return findings when crates have high instability"
-        );
-
+        assert_eq!(findings.len(), 1, "one SDP violation expected");
         let finding = &findings[0];
         assert_eq!(finding.rule_id, "coupling");
         assert_eq!(finding.rule_name, "Code Coupling Rule");
         assert_eq!(finding.severity, Severity::Warning);
-        assert!(
-            finding.message.contains("high instability"),
-            "finding message should mention high instability"
-        );
-        assert!(
-            finding.message.contains("unstable_crate"),
-            "finding message should mention the crate name"
-        );
-        assert!(
-            finding.fingerprint.is_some(),
-            "finding should have a fingerprint for deduplication"
-        );
-        assert!(
-            finding.location.is_none(),
-            "finding location should be None since coupling is crate-level"
-        );
-    }
-
-    #[test]
-    fn test_to_findings_warning_severity() {
-        let data = CouplingData {
-            crates: vec![CrateCoupling {
-                name: "test_crate".to_string(),
-                ce: 10,
-                ca: 0, // I = 1.0 (completely unstable)
-                modules: Vec::new(),
-                dependencies: HashSet::new(),
-            }],
-            granularity: CouplingGranularity::Crate,
-            analysis_path: PathBuf::from("/test"),
-        };
-
-        let findings = data.to_findings();
-
-        assert_eq!(findings.len(), 1, "should have one finding");
         assert_eq!(
-            findings[0].severity,
-            Severity::Warning,
-            "finding should have Warning severity"
-        );
-    }
-
-    #[test]
-    fn test_to_findings_fingerprint_includes_crate_and_coupling() {
-        let data = CouplingData {
-            crates: vec![CrateCoupling {
-                name: "my_crate".to_string(),
-                ce: 8,
-                ca: 2, // I = 8/10 = 0.8 (above 0.7 threshold)
-                modules: Vec::new(),
-                dependencies: HashSet::new(),
-            }],
-            granularity: CouplingGranularity::Crate,
-            analysis_path: PathBuf::from("/test"),
-        };
-
-        let findings = data.to_findings();
-
-        assert!(!findings.is_empty(), "should have at least one finding");
-
-        let fingerprint = findings[0]
-            .fingerprint
-            .as_ref()
-            .expect("should have fingerprint");
-        assert!(
-            fingerprint.contains("coupling:my_crate:8:2"),
-            "fingerprint should contain rule id, crate name, ce, and ca"
-        );
-    }
-
-    #[test]
-    fn test_to_findings_multiple_crates_mixed_instability() {
-        let data = CouplingData {
-            crates: vec![
-                CrateCoupling {
-                    name: "stable_crate".to_string(),
-                    ce: 1,
-                    ca: 9, // I = 0.1 (stable)
-                    modules: Vec::new(),
-                    dependencies: HashSet::new(),
-                },
-                CrateCoupling {
-                    name: "unstable_crate".to_string(),
-                    ce: 9,
-                    ca: 1, // I = 0.9 (unstable)
-                    modules: Vec::new(),
-                    dependencies: HashSet::new(),
-                },
-            ],
-            granularity: CouplingGranularity::Crate,
-            analysis_path: PathBuf::from("/test"),
-        };
-
-        let findings = data.to_findings();
-
-        assert_eq!(
-            findings.len(),
-            1,
-            "should only have one finding for the unstable crate"
+            finding.message,
+            "Crate 'core' (I=0.20) depends on less stable crate 'plugin' (I=0.75), violating the Stable Dependencies Principle"
         );
         assert_eq!(
-            findings[0].rule_id, "coupling",
-            "finding should have correct rule_id"
+            finding.fingerprint.as_deref(),
+            Some("coupling-sdp:core:plugin")
+        );
+        assert!(finding.location.is_none());
+    }
+
+    #[test]
+    fn test_to_findings_ignores_dependency_with_equal_instability() {
+        let crates = [
+            crate_coupling("left", 1, 1, &["right"]), // I = 0.5
+            crate_coupling("right", 2, 2, &[]),       // I = 0.5
+        ];
+
+        assert!(
+            sdp_findings(&crates, None).is_empty(),
+            "equally stable dependencies do not violate the SDP"
         );
     }
 
     #[test]
-    fn test_to_findings_with_zero_total_coupling() {
-        let data = CouplingData {
-            crates: vec![CrateCoupling {
-                name: "isolated_crate".to_string(),
-                ce: 0,
-                ca: 0, // I = 0/0 = undefined, should not generate finding
-                modules: Vec::new(),
-                dependencies: HashSet::new(),
-            }],
-            granularity: CouplingGranularity::Crate,
-            analysis_path: PathBuf::from("/test"),
-        };
+    fn test_to_findings_orders_violations_by_dependant_then_dependency() {
+        let crates = [
+            crate_coupling("zeta", 1, 9, &["unstable_b", "unstable_a"]), // I = 0.10
+            crate_coupling("alpha", 1, 9, &["unstable_b", "unstable_a"]), // I = 0.10
+            crate_coupling("unstable_a", 9, 1, &[]),                     // I = 0.90
+            crate_coupling("unstable_b", 9, 1, &[]),                     // I = 0.90
+        ];
 
-        let findings = data.to_findings();
+        let fingerprints: Vec<String> = sdp_findings(&crates, None)
+            .into_iter()
+            .filter_map(|finding| finding.fingerprint)
+            .collect();
 
-        assert!(
-            findings.is_empty(),
-            "to_findings should return empty for crates with zero total coupling"
+        assert_eq!(
+            fingerprints,
+            [
+                "coupling-sdp:alpha:unstable_a",
+                "coupling-sdp:alpha:unstable_b",
+                "coupling-sdp:zeta:unstable_a",
+                "coupling-sdp:zeta:unstable_b",
+            ]
         );
     }
 
     #[test]
-    fn test_to_findings_empty_crates() {
-        let data = CouplingData {
-            crates: Vec::new(),
-            granularity: CouplingGranularity::Crate,
-            analysis_path: PathBuf::from("/test"),
+    fn test_to_findings_in_staged_mode_reports_edges_touching_an_affected_crate() {
+        // stable_core (I = 0.25) -> volatile_ui (I = 0.75) violates the SDP;
+        // unrelated is part of the graph but not of that edge.
+        let crates = [
+            crate_coupling("stable_core", 1, 3, &["volatile_ui"]),
+            crate_coupling("volatile_ui", 3, 1, &[]),
+            crate_coupling("unrelated", 0, 0, &[]),
+        ];
+        let affected = |names: &[&str]| -> HashSet<String> {
+            names.iter().map(|name| name.to_string()).collect()
         };
 
-        let findings = data.to_findings();
+        for staged in [["stable_core"], ["volatile_ui"]] {
+            let findings = sdp_findings(&crates, Some(&affected(&staged)));
+            assert_eq!(
+                findings
+                    .iter()
+                    .filter_map(|finding| finding.fingerprint.as_deref())
+                    .collect::<Vec<_>>(),
+                ["coupling-sdp:stable_core:volatile_ui"],
+                "staging {staged:?} should report the edge"
+            );
+        }
+        assert!(sdp_findings(&crates, Some(&affected(&["unrelated"]))).is_empty());
+    }
 
-        assert!(
-            findings.is_empty(),
-            "to_findings should return empty when there are no crates"
-        );
+    #[test]
+    fn test_analyze_ignores_dev_dependency_edges() {
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp directory");
+        let root = temp_dir.path();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"app\", \"fixtures\"]\nresolver = \"2\"\n",
+        )
+        .expect("Failed to write workspace Cargo.toml");
+        for (name, manifest_extra) in [
+            (
+                "app",
+                "[dev-dependencies]\nfixtures = { path = \"../fixtures\" }\n",
+            ),
+            ("fixtures", ""),
+        ] {
+            let crate_dir = root.join(name);
+            fs::create_dir_all(crate_dir.join("src")).expect("Failed to create crate src");
+            fs::write(
+                crate_dir.join("Cargo.toml"),
+                format!(
+                    "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n{manifest_extra}"
+                ),
+            )
+            .expect("Failed to write crate Cargo.toml");
+            fs::write(crate_dir.join("src/lib.rs"), "").expect("Failed to write lib.rs");
+        }
+
+        let data = CouplingRule::new()
+            .analyze(&CouplingArgs {
+                path: root.to_path_buf(),
+                output: CouplingOutputFormat::Json,
+                granularity: CouplingGranularity::Crate,
+                ci_output: None,
+                output_file: None,
+                staged: false,
+            })
+            .expect("coupling analysis should succeed");
+
+        for krate in &data.crates {
+            assert!(
+                krate.dependencies.is_empty(),
+                "'{}' should have no edges, got {:?}",
+                krate.name,
+                krate.dependencies
+            );
+            assert_eq!((krate.ce, krate.ca), (0, 0), "'{}' coupling", krate.name);
+        }
+        assert_eq!(data.crates.len(), 2);
+        assert!(data.to_findings().is_empty());
     }
 
     #[test]
